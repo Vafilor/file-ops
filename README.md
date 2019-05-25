@@ -26,13 +26,13 @@ All commands support a `--time` flag to output how long it took.
 Note: The database file is automatically created if it does not exist and defaults to `files.db`.
 
 ```bash
-python cli.py index path/to/index database_file.db  
+fileops index path/to/index database_file.db  
 ```
 
 ### Hash files in database
 
 ```bash
-python cli.py hash database_file.db
+fileops hash database_file.db
 ```
 
 ### Cleanup
@@ -41,7 +41,7 @@ This removes files that have been deleted, etc.
 It should be followed by the index command to keep things up to date.
 
 ```bash
-python cli.py cleanup database_file.db
+fileops cleanup database_file.db
 ```
 
 ### Calculate Folder Stats
@@ -49,7 +49,7 @@ python cli.py cleanup database_file.db
 This updates all folders with their sizes. This is a slow process.
 
 ```bash
-python cli.py folder-stats database_file.db
+fileops folder-stats database_file.db
 ```
 
 ## Find duplicate files by comparing hashes 
