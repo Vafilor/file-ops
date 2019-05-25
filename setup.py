@@ -11,7 +11,7 @@ setuptools.setup(
     description="Filesystem operations to index files and hash their contents",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/pypa/sampleproject", # TODO
+    url="https://github.com/Vafilor/file-ops",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
