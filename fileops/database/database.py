@@ -352,43 +352,14 @@ class FileDatabase:
         c = self.connection.cursor()
 
         c.execute("""
-            UPDATE files AS f
+            UPDATE files
             SET size = COALESCE(
                 (SELECT sum(f2.size)
                  FROM files AS f2
-                 WHERE f2.path LIKE f.path || '%' AND f2.is_directory = 0), 0)
-            WHERE f.is_directory = 1 and size is null;
+                 WHERE f2.path LIKE files.path || '%' AND f2.is_directory = 0), 0)
+            WHERE files.is_directory = 1 and size is null;
             """)
 
         self.connection.commit()
         c.close()
-
-    def calculate_directory_sizes(self, limit: Optional[int] = None, chunk_size: int = 500):
-        """
-        Goes through each directory in the database that needs its size updated, and updates it.
-
-        This method is very slow right now due to the way we calculate the size.
-        """
-        index = 0
-        total = 0
-
-        if limit is not None and limit < chunk_size:
-            chunk_size = limit
-
-        while True:
-            directories = self.get_directories(index, ['id', 'path'], chunk_size)
-            total += len(directories)
-
-            if len(directories) == 0:
-                break
-
-            index = directories[-1]['id']
-
-            for directory in directories:
-                self.update_directory_size(directory['path'])
-
-            if limit is not None and total >= limit:
-                break
-
-
 

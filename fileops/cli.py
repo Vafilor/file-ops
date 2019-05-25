@@ -133,7 +133,7 @@ def folder_stats_files(*args):
 
     db = FileDatabase(output_path)
     db.create_file_table()
-    db.calculate_directory_sizes()
+    db.update_directory_sizes()
     db.close()
 
 

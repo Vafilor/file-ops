@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
     
 setuptools.setup(
     name="file-ops",
-    version="1.0.1",
+    version="1.0.3",
     author="Andrey Melnikov",
     author_email="vafilor@gmail.com",
     description="Filesystem operations to index files and hash their contents",
@@ -20,3 +20,4 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
 )
+
