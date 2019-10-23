@@ -17,6 +17,12 @@ With that information you can (quickly)
 * Find duplicate files by comparing hashes
 * Find the largest directories
 
+## Installation
+
+```bash
+pip install file-ops
+```
+
 ## Commands
 
 All commands support a `--time` flag to output how long it took.
