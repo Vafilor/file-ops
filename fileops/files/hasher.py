@@ -53,19 +53,14 @@ class Hasher(Operator):
     # Bytes to read at a time while calculating md5 hash
     BytesToRead = 1048576
 
-    def __init__(self, max_workers: int = 10, progress: Optional[HasherProgressReporter] = None):
+    def __init__(self, progress: Optional[HasherProgressReporter] = None):
         """
         max_workers:
             The number of threads we should use while hashing files.
         """
         Operator.__init__(self)
-        self.max_workers = max_workers
         self.output_queue = None
-        self.futures = {}
-        self.lock = None
-        self.finish_condition = None
         self.progress = progress
-        self.executor = None
 
     def process(self, input_queue: Queue, output_queue: Queue) -> None:
         """
@@ -75,67 +70,29 @@ class Hasher(Operator):
         output_queue:
             A Queue of File(s) that have their content_hash calculated.
         """
-        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
-
-        self.lock = Lock()
-        self.finish_condition = Condition(self.lock)
-        self.output_queue = output_queue
-        self.futures = {}
 
         file = input_queue.get()
         while not isinstance(file, TerminateOperand):
-            if file.is_directory:
+            try:
+                is_directory = file.is_directory
+            except FileNotFoundError:
+                # todo error log
+                print(f'{file.path} not found')
+                file = input_queue.get()
+                continue
+
+            if is_directory:
                 output_queue.put(file)
             else:
-                self.submit_file(self.executor, file)
+                out_file, err = self.process_file(file)
+                if err:
+                    print(err)
+
+                output_queue.put(out_file)
 
             file = input_queue.get()
 
-        # Put terminator back on queue
-        input_queue.put(file)
-
-        with self.finish_condition:
-            self.finish_condition.wait_for(self.is_done)
-
-        self.executor.shutdown()
-
-    def is_done(self):
-        """
-        Returns True if there are no more files to hash.
-        """
-        return len(self.futures.keys()) == 0
-
-    def submit_file(self, executor: ThreadPoolExecutor, file: File):
-        """
-        Submits the file to have its hash calculated. On done, removes itself from the pending/hashing files.
-        """
-        self.report_progress(file, HasherProgressReporter.State.Started)
-        future = executor.submit(self.process_file, file)
-
-        with self.lock:
-            self.futures[file.path] = future
-
-        future.add_done_callback(self.finish_file)
-
-    def finish_file(self, future: Future):
-        """
-        Finishes processing the hashed file, removes it from the pending/hashing files list,
-        and puts it on the output queue.
-        """
-        file, exception = future.result()
-
-        with self.lock:
-            del self.futures[file.path]
-
-        self.output_queue.put(file)
-
-        if exception is not None:
-            self.report_progress(file, HasherProgressReporter.State.Failed, exception)
-        else:
-            self.report_progress(file, HasherProgressReporter.State.Finished)
-
-        with self.finish_condition:
-            self.finish_condition.notify()
+        output_queue.put(TerminateOperand())
 
     def process_file(self, file: File) -> Tuple[File, Optional[BaseException]]:
         """
@@ -157,7 +114,3 @@ class Hasher(Operator):
             return file, ex
 
         return file, None
-
-    def report_progress(self, file: File, state: HasherProgressReporter.State, message: Optional[BaseException] = None):
-        if self.progress is not None:
-            self.progress.submit_file(file, state, message)

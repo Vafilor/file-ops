@@ -141,6 +141,9 @@ class File:
         return self.content_hash
 
     def __eq__(self, other):
+        if not isinstance(other, File):
+            return False
+
         return self.size == other.size and self.content_hash == other.content_hash
 
     def __str__(self):

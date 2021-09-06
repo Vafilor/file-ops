@@ -28,9 +28,9 @@ class FileDatabase:
         """Gets the current time in utc."""
         return datetime.datetime.utcnow()
 
-    def create_file_table(self):
+    def create_tables(self):
         """
-        Creates the files table.
+        Creates the database tables.
         """
         c = self.connection.cursor()
 
@@ -61,13 +61,70 @@ class FileDatabase:
         except sqlite3.OperationalError:
             pass  # It's okay, we already have the index.
 
+        join_sql = """
+                    CREATE TABLE IF NOT EXISTS file_links(
+                        file_1_id INTEGER,
+                        file_2_id INTEGER
+                    );
+                """
+
+        c.execute(join_sql)
+
         self.connection.commit()
 
         c.close()
 
+    def get_files(self, order: str, limit: int = 100, offset: int = 0) -> Sequence[DatabaseFile]:
+        """
+        Loads files from the database
+        """
+
+        c = self.connection.cursor()
+
+        query = "SELECT * FROM files ORDER BY {} LIMIT {} OFFSET {}".format(order, limit, offset)
+
+        c.execute(query)
+
+        results = c.fetchall()
+
+        c.close()
+
+        # Pre allocate list size
+        formatted = [None] * len(results)
+        for i, result in enumerate(results):
+            db_file = DatabaseFile(
+                key=result['id'],
+                path=result['path'],
+                size=result['size'],
+                content_hash=result['hash'],
+                modified_at=result['modified_at'],
+                is_directory=result['is_directory'],
+                deleted_at=result['deleted_at']
+            )
+
+            formatted[i] = db_file
+
+        return formatted
+
+    def insert_same_hash(self, files: Sequence[DatabaseFile]):
+        if not files:
+            return
+
+        c = self.connection.cursor()
+
+        base_file = files[0]
+        for file in files:
+            c.execute("INSERT INTO file_links"
+                      "(file_1_id, file_2_id) "
+                      "VALUES(?, ?);",
+                      (base_file.key, file.key))
+
+        self.connection.commit()
+        c.close()
+
     def insert_files(self, files: Union[Sequence[File], File]):
         """
-        Inserts files into the databse with the following fields:
+        Inserts files into the database with the following fields:
             * path
             * record_created_at
             * updated_at
@@ -192,6 +249,25 @@ class FileDatabase:
         self.connection.commit()
         c.close()
 
+    def delete_by_ids(self, files: Union[Sequence[DatabaseFile], DatabaseFile]):
+        """
+        Deletes the files.
+        """
+        if files is None or len(files) == 0:
+            return
+
+        if not isinstance(files, list):
+            files = [files]
+
+        c = self.connection.cursor()
+
+        query = "DELETE FROM files WHERE path IN ({0})".format(','.join('?' for _ in files))
+
+        c.execute(query, [file.key for file in files])
+
+        self.connection.commit()
+        c.close()
+
     def delete(self, files: Union[Sequence[File], File]):
         """
         Deletes the files.
@@ -240,6 +316,18 @@ class FileDatabase:
         c.close()
 
         return results
+
+    def delete_existing(self, files: Union[Sequence[DatabaseFile], DatabaseFile]):
+        """
+        Deletes the files if they have a key set.
+        """
+        if not isinstance(files, list):
+            files = [files]
+
+        if len(files) == 0:
+            return
+
+        self.delete([f for f in files if f.key is not None])
 
     def update_or_insert(self, files: Union[Sequence[DatabaseFile], DatabaseFile]):
         """

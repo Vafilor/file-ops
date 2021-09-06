@@ -10,17 +10,33 @@ class TerminateOperand:
 
         self.when = when
 
+    def __eq__(self, other):
+        if not isinstance(other, TerminateOperand):
+            return False
+
+        # All TerminateOperands are equal to each other.
+        return True
+
 
 class Operator:
-    """An InputOutputOperator takes input from a Queue, does work on it, and outputs the results into another Queue"""
+    """An Operator takes input from a Queue, does work on it, and outputs the results into another Queue"""
     def __init__(self):
         pass
 
-    def process(self, input_queue: Queue, output_queue: Queue) -> None:
-        item = input_queue.get()
-        while not isinstance(item, TerminateOperand):
-            output_queue.put(item)
-            item = input_queue.get()
+    def _action(self, item, output_queue: Queue) -> None:
+        output_queue.put(item)
 
-        # Put it back so other operators get the Termination signal
-        input_queue.put(item)
+    def _initialize(self, input_queue: Queue, output_queue: Queue) -> None:
+        pass
+
+    def _process_actions(self, input_queue: Queue, output_queue: Queue) -> None:
+        for item in iter(input_queue.get, TerminateOperand()):
+            self._action(item, output_queue)
+
+    def _finish(self, input_queue: Queue, output_queue: Queue) -> None:
+        pass
+
+    def process(self, input_queue: Queue, output_queue: Queue) -> None:
+        self._initialize(input_queue, output_queue)
+        self._process_actions(input_queue, output_queue)
+        self._finish(input_queue, output_queue)

@@ -3,8 +3,9 @@ import os
 import os.path
 
 import time
+import datetime
 
-from fileops.files.producer import FileProducer, PrintFileProgress
+from fileops.files.producer import FileProducer
 from fileops.database.database import FileDatabase
 from fileops.database.producer import HashFileProducer, NotDeletedFileProducer as DatabaseNotDeletedFileProducer
 from fileops.database.recorder import HashFileRecorder, DeleteFileAction
@@ -13,7 +14,25 @@ from fileops.database.recorder import FileStatsRecorder
 from fileops.files.filter import DeletedFileFilter
 from fileops.pipe.pipe import Pipe, ProcessPipe
 from fileops.files.printer import Printer
+from fileops.files.buffered_printer import BufferedPrinter
 from fileops.files.hasher import Hasher, PrintHasherProgress
+from fileops.files.counter import Counter
+
+from cProfile import Profile
+from pstats import Stats
+
+class PrefixFormatter:
+    # We place this here so it can be pickled in multiprocessing
+    def __init__(self, prefix='', with_timestamp=True):
+        self.prefix = prefix
+        self.with_timestamp = with_timestamp
+
+    def format(self, item):
+        if self.with_timestamp:
+            now = datetime.datetime.now()
+            return f'{now} {self.prefix} {item}'
+        else:
+            return f'{self.prefix} {item}'
 
 
 class FileFormatter:
@@ -27,9 +46,9 @@ class FileFormatter:
 
 def create_file_indexer(path, output_file) -> Pipe:
     file_indexer = ProcessPipe() \
-        .pipe(FileProducer(path, PrintFileProgress())) \
+        .pipe(FileProducer(path)) \
         .pipe(FileFilter(output_file)) \
-        .pipe(FileStatsRecorder(output_file)) \
+        .pipe(FileStatsRecorder(output_file))
 
     return file_indexer
 
@@ -37,7 +56,7 @@ def create_file_indexer(path, output_file) -> Pipe:
 def create_file_hasher(output_file) -> Pipe:
     file_hasher = ProcessPipe() \
             .pipe(HashFileProducer(output_file)) \
-            .pipe(Hasher(progress=PrintHasherProgress())) \
+            .pipe(Hasher()) \
             .pipe(HashFileRecorder(output_file)) \
 
     return file_hasher
@@ -67,7 +86,7 @@ def index_files(*args):
         output_path = os.path.abspath(os.path.expandvars(args[1]))
 
     db = FileDatabase(output_path)
-    db.create_file_table()
+    db.create_tables()
     db.close()
 
     print(f'path:{path}')
@@ -132,25 +151,89 @@ def folder_stats_files(*args):
         return
 
     db = FileDatabase(output_path)
-    db.create_file_table()
+    db.create_tables()
     db.update_directory_sizes()
     db.close()
+
+def map_duplicates(*args):
+    if '--help' in args:
+        print('Usage: map-duplicates [database_file]')
+        return
+
+    output_file_name = 'files.db'
+    output_path = os.path.abspath(os.path.join(os.getcwd(), output_file_name))
+    if len(args) > 0:
+        output_path = os.path.abspath(os.path.expandvars(args[0]))
+
+    if not os.path.exists(output_path):
+        print(f'{output_path} does not exist. No folders to find duplicates in.')
+        return
+
+    db = FileDatabase(output_path)
+    db.create_tables()
+
+    index = 0
+    buckets = []
+    total_bucket_size = 0
+    while True:
+        files = db.get_files('hash ASC', 1000, index)
+        if not files:
+            break
+
+        index += len(files)
+
+        bucket = []
+        for file in files:
+            if file.is_directory:
+                continue
+
+            if not bucket:
+                bucket.append(file)
+            elif file.content_hash == bucket[-1].content_hash:
+                bucket.append(file)
+            else:
+                buckets.append(bucket)
+                bucket = [file]
+
+            total_bucket_size += 1
+
+        if total_bucket_size > 500:
+            for bucket in buckets:
+                db.insert_same_hash(bucket)
+
+            buckets = []
+            total_bucket_size = 0
+
+
+    db.close()
+
+def list_duplicates(*args):
+    if '--help' in args:
+        print('Usage: list-duplicates [database_file]')
+        return
+
 
 
 def main():
     if len(sys.argv) < 2:
         print('Usage: command [options]')
-        print('commands: index, hash, cleanup, folder-stats')
+        print('commands: index, hash, cleanup, folder-stats, map-duplicates, list-duplicates')
         print('          use --time to time the program.')
         return
 
     command = sys.argv[1]
 
-    if command not in ['index', 'hash', 'cleanup', 'folder-stats']:
+    if command not in ['index', 'hash', 'cleanup', 'folder-stats', 'map-duplicates', 'list-duplicates']:
         print(f'Unknown command: {command}')
         return
 
-    args = sys.argv[2:]
+    args = []
+    opts = []
+    for arg in sys.argv[2:]:
+        if str.startswith(arg, '--'):
+            opts.append(arg)
+        else:
+            args.append(arg)
 
     start_time = time.time()
 
@@ -162,8 +245,12 @@ def main():
         cleanup_files(*args)
     elif command == 'folder-stats':
         folder_stats_files(*args)
+    elif command == 'map-duplicates':
+        map_duplicates(*args)
+    elif command == 'list-duplicates':
+        list_duplicates(*args)
 
-    if '--time' in sys.argv:
+    if '--time' in opts:
         print('Total Time:{}'.format(time.time() - start_time))
 
 

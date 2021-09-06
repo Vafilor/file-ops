@@ -1,5 +1,5 @@
 from multiprocessing import Queue
-from ..pipe.operator import Operator
+from ..pipe.operator import Operator, TerminateOperand
 from typing import Union, Optional, Sequence
 
 from .database import FileDatabase
@@ -47,6 +47,7 @@ class BufferedFileProducer(Operator):
             total_provided += len(items)
 
         database.close()
+        output_queue.put(TerminateOperand())
 
     def get_items(self, database, last_id, chunk_size) -> Sequence:
         """
