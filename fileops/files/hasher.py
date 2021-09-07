@@ -102,13 +102,13 @@ class Hasher(Operator):
         Override this method to calculate a different hash.
         """
 
-        hash_md5 = hashlib.md5()
+        hash_func = hashlib.sha512()
         try:
             with open(file.path, "rb") as f:
                 for chunk in iter(lambda: f.read(Hasher.BytesToRead), b""):
-                    hash_md5.update(chunk)
+                    hash_func.update(chunk)
 
-            file.content_hash = hash_md5.hexdigest()
+            file.content_hash = hash_func.hexdigest()
         except OSError as ex:
             file.content_hash = ''
             return file, ex

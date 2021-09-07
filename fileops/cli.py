@@ -65,9 +65,7 @@ def create_file_hasher(output_file) -> Pipe:
 def create_file_deleter(output_file) -> Pipe:
     file_deleter = ProcessPipe() \
             .pipe(DatabaseNotDeletedFileProducer(output_file)) \
-            .pipe(Printer(FileFormatter('Checking'))) \
             .pipe(DeletedFileFilter()) \
-            .pipe(Printer(FileFormatter('Deleting from database'))) \
             .pipe(DeleteFileAction(output_file)) \
 
     return file_deleter
