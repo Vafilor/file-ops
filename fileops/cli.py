@@ -73,8 +73,8 @@ def create_file_deleter(output_file) -> Pipe:
     return file_deleter
 
 
-def index_files(*args):
-    if len(args) == 0 or '--help' in args:
+def index_files(args, opts):
+    if len(args) == 0 or 'help' in opts:
         print('Usage: index path [database_file]')
         return
 
@@ -96,8 +96,8 @@ def index_files(*args):
     file_indexer.run()
 
 
-def hash_files(*args):
-    if '--help' in args:
+def hash_files(args, opts):
+    if 'help' in opts:
         print('Usage: hash [database_file]')
         return
 
@@ -116,8 +116,8 @@ def hash_files(*args):
     hasher.run()
 
 
-def cleanup_files(*args):
-    if '--help' in args:
+def cleanup_files(args, opts):
+    if 'help' in opts:
         print('Usage: cleanup [database_file]')
         return
 
@@ -136,8 +136,8 @@ def cleanup_files(*args):
     deleter.run()
 
 
-def folder_stats_files(*args):
-    if '--help' in args:
+def folder_stats_files(args, opts):
+    if 'help' in opts:
         print('Usage: folder-stats [database_file]')
         return
 
@@ -155,8 +155,8 @@ def folder_stats_files(*args):
     db.update_directory_sizes()
     db.close()
 
-def map_duplicates(*args):
-    if '--help' in args:
+def map_duplicates(args, opts):
+    if 'help' in opts:
         print('Usage: map-duplicates [database_file]')
         return
 
@@ -207,11 +207,10 @@ def map_duplicates(*args):
 
     db.close()
 
-def list_duplicates(*args):
-    if '--help' in args:
+def list_duplicates(args, opts):
+    if 'help' in opts:
         print('Usage: list-duplicates [database_file]')
         return
-
 
 
 def main():
@@ -231,26 +230,26 @@ def main():
     opts = []
     for arg in sys.argv[2:]:
         if str.startswith(arg, '--'):
-            opts.append(arg)
+            opts.append(arg[2:])  # remove the leading --
         else:
             args.append(arg)
 
     start_time = time.time()
 
     if command == 'index':
-        index_files(*args)
+        index_files(args, opts)
     elif command == 'hash':
-        hash_files(*args)
+        hash_files(args, opts)
     elif command == 'cleanup':
-        cleanup_files(*args)
+        cleanup_files(args, opts)
     elif command == 'folder-stats':
-        folder_stats_files(*args)
+        folder_stats_files(args, opts)
     elif command == 'map-duplicates':
-        map_duplicates(*args)
+        map_duplicates(args, opts)
     elif command == 'list-duplicates':
-        list_duplicates(*args)
+        list_duplicates(args, opts)
 
-    if '--time' in opts:
+    if 'time' in opts:
         print('Total Time:{}'.format(time.time() - start_time))
 
 
