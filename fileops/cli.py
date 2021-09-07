@@ -5,6 +5,7 @@ import os.path
 import time
 import datetime
 
+from fileops.files.file import humanize_file_size
 from fileops.files.producer import FileProducer
 from fileops.database.database import FileDatabase
 from fileops.database.producer import HashFileProducer, NotDeletedFileProducer as DatabaseNotDeletedFileProducer
@@ -114,6 +115,7 @@ def hash_files(args, opts):
     hasher.run()
 
 
+# TODO - if a file's size has changed - it should be delete and re-added
 def cleanup_files(args, opts):
     if 'help' in opts:
         print('Usage: cleanup [database_file]')
@@ -153,6 +155,7 @@ def folder_stats_files(args, opts):
     db.update_directory_sizes()
     db.close()
 
+# TODO - test to make sure this works across bucket boundaries
 def map_duplicates(args, opts):
     if 'help' in opts:
         print('Usage: map-duplicates [database_file]')
@@ -202,6 +205,9 @@ def map_duplicates(args, opts):
             buckets = []
             total_bucket_size = 0
 
+    for bucket in buckets:
+        db.insert_same_hash(bucket)
+
 
     db.close()
 
@@ -209,6 +215,69 @@ def list_duplicates(args, opts):
     if 'help' in opts:
         print('Usage: list-duplicates [database_file]')
         return
+
+    output_file_name = 'files.db'
+    output_path = os.path.abspath(os.path.join(os.getcwd(), output_file_name))
+    if len(args) > 0:
+        output_path = os.path.abspath(os.path.expandvars(args[0]))
+
+    if not os.path.exists(output_path):
+        print(f'{output_path} does not exist. No folders to find duplicates in.')
+        return
+
+    db = FileDatabase(output_path)
+    db.create_tables()
+
+    def print_link_information(links):
+        link = links[0]
+        size = humanize_file_size(link.file1.size)
+        duplicated_size = humanize_file_size(link.file1.size * len(links))
+
+
+        print(f"File Size: {size}\tDuplicated: {duplicated_size}")
+
+        print(f"  {link.file1.path}")
+        for link in links:
+            print(f"  {link.file2.path}")
+
+        print()
+        # print them out, newline between buckets.
+        # print out total duplicated size.
+
+    bucket = []
+    previous_id = None
+    chunk_size = 1000
+    offset = 0
+    while True:
+        links = db.get_file_links(
+            skip_identical=True,
+            skip_empty=True,
+            order="f1.size DESC, f1.id ASC, f2.id ASC",
+            limit=chunk_size,
+            offset=offset)
+
+        if not links:
+            break
+
+        for link in links:
+            new_id = link.file_1_id
+
+            if previous_id is None:
+                previous_id = new_id
+                bucket.append(link)
+            elif previous_id == new_id:
+                bucket.append(link)
+            else:
+                previous_id = new_id
+                print_link_information(bucket)
+                bucket = [link]
+
+        offset += chunk_size
+
+    if bucket:
+        print_link_information(bucket)
+
+    db.close()
 
 
 def main():

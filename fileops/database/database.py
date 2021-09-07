@@ -4,6 +4,7 @@ import sqlite3
 import datetime
 from typing import Union, Sequence, Optional
 
+from .file_link import FileLink, FileLinkWithFiles
 from ..files.file import File as File
 from .file import File as DatabaseFile
 
@@ -451,3 +452,61 @@ class FileDatabase:
         self.connection.commit()
         c.close()
 
+    def get_file_links(self, skip_identical: bool, skip_empty: bool, order: str, limit: int = 100, offset: int = 0) -> Sequence[FileLinkWithFiles]:
+        """
+        Loads file links from the database
+        """
+
+        c = self.connection.cursor()
+
+        query = """
+            SELECT fl.*, 
+                f1.id f1_id, 
+                f1.path f1_path, 
+                f1.size f1_size, 
+                f1.hash f1_hash, 
+                f1.modified_at f1_modified_at, 
+                f1.is_directory f1_is_directory, 
+                f1.deleted_at f1_deleted_at,
+                f2.id f2_id, 
+                f2.path f2_path, 
+                f2.size f2_size, 
+                f2.hash f2_hash, 
+                f2.modified_at f2_modified_at, 
+                f2.is_directory f2_is_directory, 
+                f2.deleted_at f2_deleted_at
+            FROM file_links fl 
+            INNER JOIN files f1 ON fl.file_1_id = f1.id 
+            INNER JOIN files f2 ON fl.file_2_id = f2.id
+        """
+
+        if skip_identical or skip_empty:
+            query += " WHERE "
+
+        if skip_identical:
+            query += "file_1_id != file_2_id "
+
+        if skip_empty:
+            if skip_identical:
+                query += " AND "
+            query += " f1.size != 0 "
+
+        query += "ORDER BY {} LIMIT {} OFFSET {}".format(order, limit, offset)
+
+        c.execute(query)
+
+        results = c.fetchall()
+
+        c.close()
+
+        # Pre allocate list size
+        formatted = [None] * len(results)
+        for i, result in enumerate(results):
+            file_link = FileLinkWithFiles(
+                file1=DatabaseFile.from_dict(result, 'f1_'),
+                file2=DatabaseFile.from_dict(result, 'f2_')
+            )
+
+            formatted[i] = file_link
+
+        return formatted
