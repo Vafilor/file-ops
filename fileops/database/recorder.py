@@ -3,10 +3,10 @@ from multiprocessing.queues import Queue
 from ..pipe.operator import TerminateOperand, Operator
 from typing import Union, Optional
 
-
 from ..files.file import File
 from .file import File as DatabaseFile
 from .database import FileDatabase
+import datetime
 
 
 class BufferedFileRecorder(Operator):
@@ -15,6 +15,7 @@ class BufferedFileRecorder(Operator):
 
     We use a chunk to avoid doing the operation on a single file at a time, so it should be more efficient.
     """
+
     def __init__(self, database_path: Optional[Union[bytes, str]] = None, chunk_size: int = 500):
         """
         database_path:
@@ -32,8 +33,9 @@ class BufferedFileRecorder(Operator):
 
         chunk = []
 
-        file = input_queue.get()
-        while not isinstance(file, TerminateOperand):
+        count = 0
+
+        for file in iter(input_queue.get, TerminateOperand()):
             correct_input, message = self.is_correct_input(file)
             if not correct_input:
                 print(message)
@@ -48,10 +50,9 @@ class BufferedFileRecorder(Operator):
                     output_queue.put(chunklet)
 
                 chunk = []
+                print(f'{datetime.datetime.now()} processed chunk {count} for recorder')
+                count += 1
 
-            file = input_queue.get()
-
-        input_queue.put(file)
         self.process_chunk(database, chunk)
         for chunklet in chunk:
             output_queue.put(chunklet)
@@ -96,13 +97,15 @@ class FileStatsRecorder(BufferedFileRecorder):
             print(f'Exception getting file stats for {item.path}. Exception {ex}')
 
     def process_chunk(self, database, chunk):
-        database.update_or_insert(chunk)
+        database.delete_by_ids([file for file in chunk if file.key is not None])
+        database.insert_files(chunk)
 
 
 class HashFileRecorder(BufferedFileRecorder):
     """
     Updates the file hashes into the database.
     """
+
     def process_chunk(self, database, chunk):
         database.update_file_hashes(chunk)
 
@@ -112,6 +115,7 @@ class DeleteFileRecorder(BufferedFileRecorder):
     """
     Marks files deleted in a database.
     """
+
     def process_chunk(self, database, chunk):
         database.mark_deleted(chunk)
 
@@ -120,8 +124,6 @@ class DeleteFileAction(BufferedFileRecorder):
     """
     Deletes files from database.
     """
+
     def process_chunk(self, database, chunk):
         database.delete(chunk)
-
-
-

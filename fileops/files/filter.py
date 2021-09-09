@@ -22,6 +22,3 @@ class DeletedFileFilter(Operator):
                 output_queue.put(file)
 
             file = input_queue.get()
-
-        # Put the TerminateOperand back so other consumers get it.
-        input_queue.put(file)

@@ -3,6 +3,7 @@ from threading import Thread
 
 from .operator import TerminateOperand
 
+import datetime
 
 class NullQueue:
     """
@@ -25,7 +26,7 @@ class Pipe:
     E.g. multiple producers for the first part of the pipe and multiple consumers at each part of the pipe.
 
     Pipes use Queues to communicate the data between each part of the pipe.
-    As each part of the pipe is done, a TeminateOperand is put on the queue to signal it.
+    As each part of the pipe is done, a TerminateOperand is put on the queue to signal it.
 
     It is expected that Operands put the TerminateOperand back on the input_queue when they run into it
     so we can support multiple consumers/producers.
@@ -92,14 +93,14 @@ class ProcessPipe(Pipe):
 
             processes.append(chunk)
 
-        # Skip first null queue
-        index = 0
-        for process_chunk in processes:
-            index += 1
+        for index, process_chunk in enumerate(processes, 1):
             for process in process_chunk:
                 process.join()
 
-            self.queues[index].put(TerminateOperand())
+            if index != len(processes):
+                for _ in processes[index]:
+                    self.queues[index].put(TerminateOperand())
+
 
 
 class ThreadPipe(Pipe):

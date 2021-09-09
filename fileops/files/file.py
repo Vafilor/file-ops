@@ -4,6 +4,17 @@ import stat
 from datetime import datetime
 from typing import Optional, Union
 
+def humanize_file_size(size: int, decimals: int = 0) -> str:
+    suffixs = ['', 'KB', 'MB', 'GB', 'TB']
+    suffix = 0
+
+    while size > 1000:
+        suffix += 1
+        size /= 1000
+
+    final_size = format(size, f'.{decimals}f')
+
+    return f"{final_size}{suffixs[suffix]}"
 
 class File:
     # Constant for how many bytes to read at a time while calculating content_hash for a file.
@@ -141,6 +152,9 @@ class File:
         return self.content_hash
 
     def __eq__(self, other):
+        if not isinstance(other, File):
+            return False
+
         return self.size == other.size and self.content_hash == other.content_hash
 
     def __str__(self):
