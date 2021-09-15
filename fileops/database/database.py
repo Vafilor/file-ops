@@ -1,5 +1,3 @@
-import os
-import os.path
 import pathlib
 import sqlite3
 import datetime
@@ -489,6 +487,20 @@ class FileDatabase:
         connection.close()
 
         return total_records
+
+    def clear_file_links(self):
+        """
+        Deletes all of the file link records
+        """
+
+        connection = self.create_connection()
+        cursor = connection.cursor()
+
+        cursor.execute("DELETE FROM file_links")
+        connection.commit()
+
+        cursor.close()
+        connection.close()
 
     def statistics(self) -> DatabaseStatistics:
         """

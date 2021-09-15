@@ -179,6 +179,7 @@ def map_duplicates(database: Optional[pathlib.Path], time_command: bool):
 
     db = FileDatabase(database)
     db.create_tables()
+    db.clear_file_links()
 
     connection = db.create_connection()
     cursor = connection.cursor()
