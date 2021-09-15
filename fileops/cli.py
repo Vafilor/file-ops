@@ -324,7 +324,7 @@ def list_duplicates(database: Optional[pathlib.Path], output: Optional[pathlib.P
 def database_cli():
     pass
 
-@database_cli.command()
+@database_cli.command(help="Prints statistics about the provided database")
 @click.option('-d', '--database', type=click.Path(exists=False, path_type=pathlib.Path))
 def stats(database: Optional[pathlib.Path]):
     if database is None:
@@ -333,6 +333,9 @@ def stats(database: Optional[pathlib.Path]):
     db = FileDatabase(database)
     stats = db.statistics()
 
+    stat = os.stat(database)
+
+    click.echo(f"File size {humanize_file_size(stat.st_size)}")
     click.echo(f"Total records {stats.total_records}")
     click.echo(f"Files {stats.files}")
     click.echo(f"Files hashed {stats.files_hashed}")
