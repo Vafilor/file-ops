@@ -38,6 +38,7 @@ class BufferedFileRecorder(Operator):
 
         chunk = []
         count = 0
+        total_count = 0
 
         for file in iter(input_queue.get, TerminateOperand()):
             count += 1
@@ -57,7 +58,8 @@ class BufferedFileRecorder(Operator):
                 chunk = []
 
                 if count >= self.report_file_count:
-                    print(f'{datetime.datetime.now()} processed {count} files for recorder')
+                    total_count += count
+                    print(f'{datetime.datetime.now()} processed {total_count} files for recorder')
                     count = 0
 
         self.process_chunk(self.database, cursor, chunk)
