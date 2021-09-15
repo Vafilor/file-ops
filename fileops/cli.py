@@ -343,6 +343,10 @@ def stats(database: Optional[pathlib.Path]):
     click.echo(f"Total size {humanize_file_size(stats.total_size)}")
 
 
-if __name__ == '__main__':
+def main():
     cli.add_command(database_cli)
     cli()
+
+
+if __name__ == '__main__':
+    main()
