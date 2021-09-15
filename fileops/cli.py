@@ -1,15 +1,19 @@
-import sys
+import pathlib
 import os
 import os.path
 
 import time
 import datetime
 
+import click
+
+from typing import Union, Optional
+
 from fileops.files.file import humanize_file_size
 from fileops.files.producer import FileProducer
 from fileops.database.database import FileDatabase
 from fileops.database.producer import HashFileProducer, NotDeletedFileProducer as DatabaseNotDeletedFileProducer
-from fileops.database.recorder import HashFileRecorder, DeleteFileAction
+from fileops.database.recorder import HashFileRecorder, DeleteFileAction, FileInserter
 from fileops.database.filter import FileFilter
 from fileops.database.recorder import FileStatsRecorder
 from fileops.files.filter import DeletedFileFilter
@@ -45,20 +49,30 @@ class FileFormatter:
         return f'{self.prefix} {item.path}'
 
 
-def create_file_indexer(path, output_file) -> Pipe:
-    file_indexer = ProcessPipe() \
-        .pipe(FileProducer(path)) \
-        .pipe(FileFilter(output_file)) \
-        .pipe(FileStatsRecorder(output_file))
+def default_database_path():
+    return pathlib.Path(os.getcwd(), 'files.db')
+
+
+def create_file_indexer(path: pathlib.Path, database: FileDatabase) -> Pipe:
+    if database.file_count() == 0:
+        # If database doesn't exist, we don't need to filter any files.
+        file_indexer = ProcessPipe() \
+            .pipe(FileProducer(path)) \
+            .pipe(FileInserter(database))
+    else:
+        file_indexer = ProcessPipe() \
+            .pipe(FileProducer(path)) \
+            .pipe(FileFilter(database)) \
+            .pipe(FileStatsRecorder(database))
 
     return file_indexer
 
 
-def create_file_hasher(output_file) -> Pipe:
+def create_file_hasher(database: FileDatabase) -> Pipe:
     file_hasher = ProcessPipe() \
-            .pipe(HashFileProducer(output_file)) \
+            .pipe(HashFileProducer(database)) \
             .pipe(Hasher()) \
-            .pipe(HashFileRecorder(output_file)) \
+            .pipe(HashFileRecorder(database)) \
 
     return file_hasher
 
@@ -72,112 +86,113 @@ def create_file_deleter(output_file) -> Pipe:
     return file_deleter
 
 
-def index_files(args, opts):
-    if len(args) == 0 or 'help' in opts:
-        print('Usage: index path [database_file]')
-        return
+@click.group()
+def cli():
+    pass
 
-    path = args[0]
 
-    output_file_name = 'files.db'
-    output_path = os.path.abspath(os.path.join(os.getcwd(), output_file_name))
-    if len(args) > 1:
-        output_path = os.path.abspath(os.path.expandvars(args[1]))
+@cli.command()
+@click.argument('path', type=click.Path(exists=True, file_okay=False, path_type=pathlib.Path))
+@click.option('-d', '--database',
+              type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
+              help="Path to an existing database file. If not provided, one will be created named 'file.db' ")
+@click.option('-t', '--time', 'time_command', is_flag=True, help="Time the command")
+def index(path: pathlib.Path, database: Optional[pathlib.Path], time_command: bool):
+    if database is None:
+        database = default_database_path()
 
-    db = FileDatabase(output_path)
+    db = FileDatabase(database)
     db.create_tables()
-    db.close()
 
-    print(f'path:{path}')
-    print(f'database file:{output_path}')
+    print(f'path: {path}')
+    print(f'database file: {database}')
 
-    file_indexer = create_file_indexer(path, output_path)
+    file_indexer = create_file_indexer(path, db)
+
+    start = time.time()
+
     file_indexer.run()
 
+    if time_command:
+        print('"index {}" took {}'.format(path, time.time() - start))
 
-def hash_files(args, opts):
-    if 'help' in opts:
-        print('Usage: hash [database_file]')
-        return
+@cli.command('hash')
+@click.option('-d', '--database',
+              type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
+              help="Path to an existing database file. If not provided, one will be created named 'file.db' ")
+@click.option('-t', '--time', 'time_command', is_flag=True, help="Time the command")
+def hash_files(database: Optional[pathlib.Path], time_command: bool):
+    if database is None:
+        database = default_database_path()
 
-    output_file_name = 'files.db'
-    output_path = os.path.abspath(os.path.join(os.getcwd(), output_file_name))
-    if len(args) > 0:
-        output_path = os.path.abspath(os.path.expandvars(args[0]))
+    db = FileDatabase(database)
+    db.create_tables()
 
-    if not os.path.exists(output_path):
-        print(f'{output_path} does not exist. Nothing to hash.')
-        return
+    hasher = create_file_hasher(db)
 
-    print(f'Hashing files in {output_path}')
+    start = time.time()
 
-    hasher = create_file_hasher(output_path)
     hasher.run()
 
-
-# TODO - if a file's size has changed - it should be delete and re-added
-def cleanup_files(args, opts):
-    if 'help' in opts:
-        print('Usage: cleanup [database_file]')
-        return
-
-    output_file_name = 'files.db'
-    output_path = os.path.abspath(os.path.join(os.getcwd(), output_file_name))
-    if len(args) > 0:
-        output_path = os.path.abspath(os.path.expandvars(args[0]))
-
-    if not os.path.exists(output_path):
-        print(f'{output_path} does not exist. Nothing to cleanup.')
-        return
-
-    print(f'Cleaning files in {output_path}')
-
-    deleter = create_file_deleter(output_path)
-    deleter.run()
+    if time_command:
+        print('"hash {}" took {}'.format(database, time.time() - start))
 
 
-def folder_stats_files(args, opts):
-    if 'help' in opts:
-        print('Usage: folder-stats [database_file]')
-        return
+@cli.command('folder-stats')
+@click.option('-d', '--database',
+              type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
+              help="Path to an existing database file. If not provided, one will be created named 'file.db' ")
+@click.option('-t', '--time', 'time_command', is_flag=True, help="Time the command")
+def folder_stats_files(database: Optional[pathlib.Path], time_command: bool):
+    if database is None:
+        database = default_database_path()
 
-    output_file_name = 'files.db'
-    output_path = os.path.abspath(os.path.join(os.getcwd(), output_file_name))
-    if len(args) > 0:
-        output_path = os.path.abspath(os.path.expandvars(args[0]))
-
-    if not os.path.exists(output_path):
-        print(f'{output_path} does not exist. No folders to calculate stats on.')
-        return
-
-    db = FileDatabase(output_path)
+    db = FileDatabase(database)
     db.create_tables()
-    db.update_directory_sizes()
-    db.close()
+
+    start = time.time()
+
+    connection = db.create_connection()
+    cursor = connection.cursor()
+
+    try:
+        db.update_directory_sizes(cursor)
+        connection.commit()
+    except Exception as e:
+        cursor.close()
+        connection.close()
+        print(e)
+        return
+
+    cursor.close()
+    connection.close()
+
+    if time_command:
+        print('"hash {}" took {}'.format(database, time.time() - start))
 
 # TODO - test to make sure this works across bucket boundaries
-def map_duplicates(args, opts):
-    if 'help' in opts:
-        print('Usage: map-duplicates [database_file]')
-        return
+@cli.command('map-duplicates')
+@click.option('-d', '--database',
+              type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
+              help="Path to an existing database file. If not provided, one will be created named 'file.db' ")
+@click.option('-t', '--time', 'time_command', is_flag=True, help="Time the command")
+def map_duplicates(database: Optional[pathlib.Path], time_command: bool):
+    if database is None:
+        database = default_database_path()
 
-    output_file_name = 'files.db'
-    output_path = os.path.abspath(os.path.join(os.getcwd(), output_file_name))
-    if len(args) > 0:
-        output_path = os.path.abspath(os.path.expandvars(args[0]))
-
-    if not os.path.exists(output_path):
-        print(f'{output_path} does not exist. No folders to find duplicates in.')
-        return
-
-    db = FileDatabase(output_path)
+    db = FileDatabase(database)
     db.create_tables()
+
+    connection = db.create_connection()
+    cursor = connection.cursor()
+
+    start = time.time()
 
     index = 0
     buckets = []
     total_bucket_size = 0
     while True:
-        files = db.get_files('hash ASC', 1000, index)
+        files = db.get_files(cursor, 'hash ASC', 1000, index)
         if not files:
             break
 
@@ -200,49 +215,66 @@ def map_duplicates(args, opts):
 
         if total_bucket_size > 500:
             for bucket in buckets:
-                db.insert_same_hash(bucket)
+                db.insert_same_hash(cursor, bucket)
 
+            connection.commit()
             buckets = []
             total_bucket_size = 0
 
     for bucket in buckets:
-        db.insert_same_hash(bucket)
+        db.insert_same_hash(cursor, bucket)
 
+    connection.commit()
 
-    db.close()
+    cursor.close()
+    connection.close()
 
-def list_duplicates(args, opts):
-    if 'help' in opts:
-        print('Usage: list-duplicates [database_file]')
-        return
+    if time_command:
+        click.echo('"hash {}" took {}'.format(database, time.time() - start))
 
-    output_file_name = 'files.db'
-    output_path = os.path.abspath(os.path.join(os.getcwd(), output_file_name))
-    if len(args) > 0:
-        output_path = os.path.abspath(os.path.expandvars(args[0]))
+@cli.command('list-duplicates')
+@click.option('-d', '--database',
+              type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
+              help="Path to an existing database file. If not provided, one will be created named 'file.db' ")
+@click.option('-o', '--output',
+              type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
+              help="Path to a file to store output. If not provided, stdout is used.")
+@click.option('-t', '--time', 'time_command', is_flag=True, help="Time the command")
+def list_duplicates(database: Optional[pathlib.Path], output: Optional[pathlib.Path], time_command: bool):
+    if database is None:
+        database = default_database_path()
 
-    if not os.path.exists(output_path):
-        print(f'{output_path} does not exist. No folders to find duplicates in.')
-        return
-
-    db = FileDatabase(output_path)
+    db = FileDatabase(database)
     db.create_tables()
 
+    connection = db.create_connection()
+    cursor = connection.cursor()
+
+    printer = click.echo
+    output_file = None
+    if output is not None:
+        output_file = open(output, 'w')
+        printer = output_file.write
+
+    start = time.time()
+
+    total_duplicated = 0
+
     def print_link_information(links):
+        nonlocal total_duplicated
         link = links[0]
         size = humanize_file_size(link.file1.size)
-        duplicated_size = humanize_file_size(link.file1.size * len(links))
+        duplicated_amount = link.file1.size * len(links)
+        duplicated_size = humanize_file_size(duplicated_amount)
+        total_duplicated += duplicated_amount
 
+        printer(f"File Size: {size}\tDuplicated: {duplicated_size}")
 
-        print(f"File Size: {size}\tDuplicated: {duplicated_size}")
-
-        print(f"  {link.file1.path}")
+        printer(f"  {link.file1.path}")
         for link in links:
-            print(f"  {link.file2.path}")
+            printer(f"  {link.file2.path}")
 
-        print()
-        # print them out, newline between buckets.
-        # print out total duplicated size.
+        printer()
 
     bucket = []
     previous_id = None
@@ -250,6 +282,7 @@ def list_duplicates(args, opts):
     offset = 0
     while True:
         links = db.get_file_links(
+            cursor,
             skip_identical=True,
             skip_empty=True,
             order="f1.size DESC, f1.id ASC, f2.id ASC",
@@ -277,48 +310,38 @@ def list_duplicates(args, opts):
     if bucket:
         print_link_information(bucket)
 
-    db.close()
+    printer(f'Total duplicated: {humanize_file_size(total_duplicated)}')
+
+    cursor.close()
+    connection.close()
+
+    if output_file is not None:
+        output_file.close()
+
+    if time_command:
+        click.echo('"hash {}" took {}'.format(database, time.time() - start))
 
 
-def main():
-    if len(sys.argv) < 2:
-        print('Usage: command [options]')
-        print('commands: index, hash, cleanup, folder-stats, map-duplicates, list-duplicates')
-        print('          use --time to time the program.')
-        return
+@click.group(name="database")
+def database_cli():
+    pass
 
-    command = sys.argv[1]
+@database_cli.command()
+@click.option('-d', '--database', type=click.Path(exists=False, path_type=pathlib.Path))
+def stats(database: Optional[pathlib.Path]):
+    if database is None:
+        database = default_database_path()
 
-    if command not in ['index', 'hash', 'cleanup', 'folder-stats', 'map-duplicates', 'list-duplicates']:
-        print(f'Unknown command: {command}')
-        return
+    db = FileDatabase(database)
+    stats = db.statistics()
 
-    args = []
-    opts = []
-    for arg in sys.argv[2:]:
-        if str.startswith(arg, '--'):
-            opts.append(arg[2:])  # remove the leading --
-        else:
-            args.append(arg)
-
-    start_time = time.time()
-
-    if command == 'index':
-        index_files(args, opts)
-    elif command == 'hash':
-        hash_files(args, opts)
-    elif command == 'cleanup':
-        cleanup_files(args, opts)
-    elif command == 'folder-stats':
-        folder_stats_files(args, opts)
-    elif command == 'map-duplicates':
-        map_duplicates(args, opts)
-    elif command == 'list-duplicates':
-        list_duplicates(args, opts)
-
-    if 'time' in opts:
-        print('Total Time:{}'.format(time.time() - start_time))
+    click.echo(f"Total records {stats.total_records}")
+    click.echo(f"Files {stats.files}")
+    click.echo(f"Files hashed {stats.files_hashed}")
+    click.echo(f"Directories {stats.directories}")
+    click.echo(f"Total size {humanize_file_size(stats.total_size)}")
 
 
 if __name__ == '__main__':
-    main()
+    cli.add_command(database_cli)
+    cli()

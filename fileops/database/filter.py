@@ -17,7 +17,7 @@ class FileFilter(Operator):
     Files are considered equal if they have the same path and modified_at timestamp.
     """
 
-    def __init__(self, database_path: AnyStr = None, chunk_size: int = 999):
+    def __init__(self, database: FileDatabase, chunk_size: int = 999):
         """
         chunk_size:
             how many files to check from the database at a time. This should be <= 999
@@ -26,13 +26,12 @@ class FileFilter(Operator):
 
         """
         super().__init__()
-        self.database_path = database_path
+        self.database = database
         self.chunk_size = chunk_size
 
     def process(self, input_queue: Queue, output_queue: Queue) -> None:
-        database = FileDatabase(self.database_path)
-
-        count = 0
+        connection = self.database.create_connection()
+        cursor = connection.cursor()
 
         pending_files = []
         for file in iter(input_queue.get, TerminateOperand()):
@@ -40,13 +39,11 @@ class FileFilter(Operator):
 
             if len(pending_files) >= self.chunk_size:
                 try:
-                    filtered_files = self.filter_files(database, pending_files)
+                    filtered_files = self.filter_files(self.database, cursor, pending_files)
                     pending_files = []
                     for filtered_file in filtered_files:
                         output_queue.put(filtered_file)
 
-                    count += 1
-                    print(f'{datetime.datetime.now()} Processed {count}')
                 except sqlite3.OperationalError as e:
                     pass
 
@@ -55,20 +52,21 @@ class FileFilter(Operator):
         while tries < 5:
             tries += 1
             try:
-                filtered_files = self.filter_files(database, pending_files)
+                filtered_files = self.filter_files(self.database, cursor, pending_files)
                 for filtered_file in filtered_files:
                     output_queue.put(filtered_file)
                 break
             except sqlite3.OperationalError as e:
                 time.sleep(0.1)
 
-        database.close()
+        cursor.close()
+        connection.close()
 
-    def filter_files(self, database: FileDatabase, files: Sequence[File]) -> Sequence[DatabaseFile]:
+    def filter_files(self, database: FileDatabase, cursor: sqlite3.Cursor, files: Sequence[File]) -> Sequence[DatabaseFile]:
         if len(files) == 0:
             return []
 
-        existing = database.get_files_by_paths([file.path for file in files], ['id', 'path', 'modified_at'])
+        existing = database.get_files_by_paths(cursor, [file.path for file in files], ['id', 'path', 'modified_at'])
         file_map = {file['path']: file for file in existing}
 
         filtered = []

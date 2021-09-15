@@ -50,7 +50,7 @@ class Hasher(Operator):
     Override the process_file method to change the hashing algorithm.
     """
 
-    # Bytes to read at a time while calculating md5 hash
+    # Bytes to read at a time while calculating hash
     BytesToRead = 1048576
 
     def __init__(self, progress: Optional[HasherProgressReporter] = None):
@@ -92,12 +92,10 @@ class Hasher(Operator):
 
             file = input_queue.get()
 
-        output_queue.put(TerminateOperand())
-
     def process_file(self, file: File) -> Tuple[File, Optional[BaseException]]:
         """
         Calculates the hash of the file, assumed to not be a directory.
-        This method calculates the md5 hash. On failure, the hash is set to the empty string.
+        This method calculates the sha512 hash. On failure, the hash is set to the empty string.
 
         Override this method to calculate a different hash.
         """

@@ -1,4 +1,5 @@
 import os
+import pathlib
 
 from os.path import join
 from multiprocessing import Queue
@@ -12,7 +13,7 @@ class FileProducer(Operator):
     """
     Gets all files and directories under a path. Outputs the files as File objects to a queue.
     """
-    def __init__(self, path: Union[bytes, str]):
+    def __init__(self, path: pathlib.Path):
         super().__init__()
         self.path = path
 

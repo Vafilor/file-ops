@@ -1,3 +1,4 @@
+import sqlite3
 from multiprocessing.queues import Queue
 
 from ..pipe.operator import TerminateOperand, Operator
@@ -16,7 +17,9 @@ class BufferedFileRecorder(Operator):
     We use a chunk to avoid doing the operation on a single file at a time, so it should be more efficient.
     """
 
-    def __init__(self, database_path: Optional[Union[bytes, str]] = None, chunk_size: int = 500):
+    def __init__(self, database: FileDatabase,
+                 chunk_size: int = 500,
+                 report_file_count=100000):
         """
         database_path:
             path of the database.
@@ -25,17 +28,19 @@ class BufferedFileRecorder(Operator):
             maximum number of records to update at a time.
         """
         Operator.__init__(self)
-        self.database_path = database_path
+        self.database = database
         self.chunk_size = chunk_size
+        self.report_file_count = report_file_count
 
     def process(self, input_queue: Queue, output_queue: Queue) -> None:
-        database = FileDatabase(self.database_path)
+        connection = self.database.create_connection()
+        cursor = connection.cursor()
 
         chunk = []
-
         count = 0
 
         for file in iter(input_queue.get, TerminateOperand()):
+            count += 1
             correct_input, message = self.is_correct_input(file)
             if not correct_input:
                 print(message)
@@ -45,17 +50,22 @@ class BufferedFileRecorder(Operator):
                 chunk.append(file)
 
             if len(chunk) >= self.chunk_size:
-                self.process_chunk(database, chunk)
+                self.process_chunk(self.database, cursor, chunk)
                 for chunklet in chunk:
                     output_queue.put(chunklet)
 
                 chunk = []
-                print(f'{datetime.datetime.now()} processed chunk {count} for recorder')
-                count += 1
 
-        self.process_chunk(database, chunk)
+                if count >= self.report_file_count:
+                    print(f'{datetime.datetime.now()} processed {count} files for recorder')
+                    count = 0
+
+        self.process_chunk(self.database, cursor, chunk)
         for chunklet in chunk:
             output_queue.put(chunklet)
+
+        cursor.close()
+        connection.close()
 
     def is_correct_input(self, item):
         """
@@ -77,7 +87,7 @@ class BufferedFileRecorder(Operator):
         """
         return True
 
-    def process_chunk(self, database, chunk):
+    def process_chunk(self, database: FileDatabase, cursor: sqlite3.Cursor, chunk):
         """Override this method to process the chunk of data"""
         raise NotImplementedError()
 
@@ -96,18 +106,38 @@ class FileStatsRecorder(BufferedFileRecorder):
         except OSError as ex:
             print(f'Exception getting file stats for {item.path}. Exception {ex}')
 
-    def process_chunk(self, database, chunk):
-        database.delete_by_ids([file for file in chunk if file.key is not None])
-        database.insert_files(chunk)
+    def process_chunk(self, database: FileDatabase, cursor: sqlite3.Cursor, chunk):
+        database.delete_by_ids(cursor, [file for file in chunk if file.key is not None])
+        database.insert_files(cursor, chunk)
 
+        cursor.connection.commit()
+
+
+class FileInserter(BufferedFileRecorder):
+    def is_correct_input(self, item):
+        if isinstance(item, File):
+            return True, ''
+
+        return False, f'{item} is not a File'
+
+    def process_item(self, item):
+        try:
+            item.load()
+            return True
+        except OSError as ex:
+            print(f'Exception getting file stats for {item.path}. Exception {ex}')
+
+    def process_chunk(self, database: FileDatabase, cursor: sqlite3.Cursor, chunk):
+        database.insert_files(cursor, chunk)
+        cursor.connection.commit()
 
 class HashFileRecorder(BufferedFileRecorder):
     """
     Updates the file hashes into the database.
     """
-
-    def process_chunk(self, database, chunk):
-        database.update_file_hashes(chunk)
+    def process_chunk(self, database: FileDatabase, cursor: sqlite3.Cursor, chunk):
+        database.update_file_hashes(cursor, chunk)
+        cursor.connection.commit()
 
 
 # TODO rename this and one below?

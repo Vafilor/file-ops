@@ -1,3 +1,4 @@
+import sqlite3
 from multiprocessing import Queue
 from ..pipe.operator import Operator, TerminateOperand
 from typing import Union, Optional, Sequence
@@ -6,7 +7,7 @@ from .database import FileDatabase
 
 
 class BufferedFileProducer(Operator):
-    def __init__(self, database_path: Union[bytes, str] = None, chunk_size: int = 500, limit: Optional[int] = None):
+    def __init__(self, database: FileDatabase, chunk_size: int = 500, limit: Optional[int] = None):
         """
        Gets files from the database, override to determine which files.
        Each record is assumed to have an id. The id is used as a tracker so we don't get the same items.
@@ -22,12 +23,13 @@ class BufferedFileProducer(Operator):
        """
         Operator.__init__(self)
         self.last_id = 0  # keeps track of the last id in the query
-        self.database_path = database_path
+        self.database = database
         self.chunk_size = chunk_size
         self.limit = limit
 
     def process(self, input_queue: Queue, output_queue: Queue) -> None:
-        database = FileDatabase(self.database_path)
+        connection = self.database.create_connection()
+        cursor = connection.cursor()
 
         total_provided = 0
 
@@ -35,7 +37,7 @@ class BufferedFileProducer(Operator):
             if self.limit is not None and total_provided >= self.limit:
                 break
 
-            items = self.get_items(database, self.last_id, self.chunk_size)
+            items = self.get_items(self.database, cursor, self.last_id, self.chunk_size)
             if len(items) == 0:
                 break
 
@@ -46,10 +48,10 @@ class BufferedFileProducer(Operator):
 
             total_provided += len(items)
 
-        database.close()
-        output_queue.put(TerminateOperand())
+        cursor.close()
+        connection.close()
 
-    def get_items(self, database, last_id, chunk_size) -> Sequence:
+    def get_items(self, database: FileDatabase, cursor: sqlite3.Cursor, last_id, chunk_size) -> Sequence:
         """
         Get items from the database.
 
@@ -69,8 +71,8 @@ class HashFileProducer(BufferedFileProducer):
     """
     Gets files that need to be hashed.
     """
-    def get_items(self, database, last_id, chunk_size) -> Sequence:
-        return database.get_files_to_hash(last_id, chunk_size)
+    def get_items(self, database: FileDatabase, cursor: sqlite3.Cursor, last_id, chunk_size) -> Sequence:
+        return database.get_files_to_hash(cursor, last_id, chunk_size)
 
 
 class NotDeletedFileProducer(BufferedFileProducer):

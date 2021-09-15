@@ -1,28 +1,32 @@
 import os
 import os.path
+import pathlib
 import sqlite3
 import datetime
 from typing import Union, Sequence, Optional
 
-from .file_link import FileLink, FileLinkWithFiles
+from .file_link import FileLinkWithFiles
 from ..files.file import File as File
 from .file import File as DatabaseFile
 
+class DatabaseStatistics:
+    def __init__(self, total_records: int, files: int, directories: int, total_size: int, files_hashed: int):
+        self.total_records = total_records
+        self.files = files
+        self.directories = directories
+        self.total_size = total_size
+        self.files_hashed = files_hashed
+
 
 class FileDatabase:
-    def __init__(self, path: Optional[Union[str, bytes]] = None):
-        """
-        path:
-            if path is None, it is set to the current working directory / files.db
-        """
-        if path is None:
-            path = os.path.join(os.getcwd(), 'files.db')
+    def __init__(self, path: pathlib.Path):
+        self.path = path
 
-        self.connection = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES)
-        self.connection.row_factory = sqlite3.Row
+    def create_connection(self):
+        connection = sqlite3.connect(self.path, detect_types=sqlite3.PARSE_DECLTYPES)
+        connection.row_factory = sqlite3.Row
 
-    def close(self):
-        self.connection.close()
+        return connection
 
     @property
     def now(self):
@@ -33,7 +37,9 @@ class FileDatabase:
         """
         Creates the database tables.
         """
-        c = self.connection.cursor()
+
+        connection = self.create_connection()
+        cursor = connection.cursor()
 
         sql = """
             CREATE TABLE IF NOT EXISTS files(
@@ -50,7 +56,7 @@ class FileDatabase:
             );
         """
 
-        c.execute(sql)
+        cursor.execute(sql)
 
         sql = """
             CREATE INDEX path_index
@@ -58,7 +64,7 @@ class FileDatabase:
         """
 
         try:
-            c.execute(sql)
+            cursor.execute(sql)
         except sqlite3.OperationalError:
             pass  # It's okay, we already have the index.
 
@@ -69,26 +75,20 @@ class FileDatabase:
                     );
                 """
 
-        c.execute(join_sql)
+        cursor.execute(join_sql)
+        connection.commit()
 
-        self.connection.commit()
+        cursor.close()
+        connection.close()
 
-        c.close()
-
-    def get_files(self, order: str, limit: int = 100, offset: int = 0) -> Sequence[DatabaseFile]:
+    def get_files(self, cursor: sqlite3.Cursor, order: str, limit: int = 100, offset: int = 0) -> Sequence[DatabaseFile]:
         """
         Loads files from the database
         """
-
-        c = self.connection.cursor()
-
         query = "SELECT * FROM files ORDER BY {} LIMIT {} OFFSET {}".format(order, limit, offset)
 
-        c.execute(query)
-
-        results = c.fetchall()
-
-        c.close()
+        cursor.execute(query)
+        results = cursor.fetchall()
 
         # Pre allocate list size
         formatted = [None] * len(results)
@@ -107,23 +107,19 @@ class FileDatabase:
 
         return formatted
 
-    def insert_same_hash(self, files: Sequence[DatabaseFile]):
+    def insert_same_hash(self, cursor: sqlite3.Cursor, files: Sequence[DatabaseFile]):
         if not files:
             return
 
-        c = self.connection.cursor()
-
         base_file = files[0]
         for file in files:
-            c.execute("INSERT INTO file_links"
+            cursor.execute("INSERT INTO file_links"
                       "(file_1_id, file_2_id) "
                       "VALUES(?, ?);",
                       (base_file.key, file.key))
 
-        self.connection.commit()
-        c.close()
 
-    def insert_files(self, files: Union[Sequence[File], File]):
+    def insert_files(self, cursor: sqlite3.Cursor, files: Union[Sequence[File], File]):
         """
         Inserts files into the database with the following fields:
             * path
@@ -142,19 +138,15 @@ class FileDatabase:
         if not isinstance(files, list):
             files = [files]
 
-        c = self.connection.cursor()
-
         now = self.now
 
         for file in files:
-            c.execute("INSERT INTO files"
+            cursor.execute("INSERT INTO files"
                       "(path, record_created_at, updated_at, modified_at, deleted_at, size, is_directory) "
                       "VALUES(?, ?, ?, ?, ?, ?, ?);",
                       (file.path, now, now, file.modified_at, file.deleted_at,
                        file.size, file.is_directory))
 
-        self.connection.commit()
-        c.close()
 
     def update_files_basic(self, files: Union[Sequence[File], File]):
         """
@@ -205,7 +197,7 @@ class FileDatabase:
         self.connection.commit()
         c.close()
 
-    def update_file_hashes(self, files: Union[Sequence[File], File]):
+    def update_file_hashes(self, cursor: sqlite3.Cursor, files: Union[Sequence[File], File]):
         """
         Updates the files' hashes.
         """
@@ -215,8 +207,6 @@ class FileDatabase:
         if not isinstance(files, list):
             files = [files]
 
-        c = self.connection.cursor()
-
         query = "UPDATE files SET hashed_at = '{0}', updated_at = '{0}', hash = CASE path".format(self.now)
 
         for file in files:
@@ -225,10 +215,8 @@ class FileDatabase:
         query += " ELSE NULL END"
         query += " WHERE path IN ({0})".format(','.join('?' for _ in files))
 
-        c.execute(query, [file.path for file in files])
+        cursor.execute(query, [file.path for file in files])
 
-        self.connection.commit()
-        c.close()
 
     def mark_deleted(self, files: Union[Sequence[File], File]):
         """
@@ -250,7 +238,7 @@ class FileDatabase:
         self.connection.commit()
         c.close()
 
-    def delete_by_ids(self, files: Union[Sequence[DatabaseFile], DatabaseFile]):
+    def delete_by_ids(self, cursor: sqlite3.Cursor, files: Union[Sequence[DatabaseFile], DatabaseFile]):
         """
         Deletes the files.
         """
@@ -260,14 +248,9 @@ class FileDatabase:
         if not isinstance(files, list):
             files = [files]
 
-        c = self.connection.cursor()
-
         query = "DELETE FROM files WHERE path IN ({0})".format(','.join('?' for _ in files))
 
-        c.execute(query, [file.key for file in files])
-
-        self.connection.commit()
-        c.close()
+        cursor.execute(query, [file.key for file in files])
 
     def delete(self, files: Union[Sequence[File], File]):
         """
@@ -288,7 +271,7 @@ class FileDatabase:
         self.connection.commit()
         c.close()
 
-    def get_files_by_paths(self, paths: Sequence[Union[str, bytes]], columns: Optional[Sequence[str]] = None):
+    def get_files_by_paths(self, cursor: sqlite3.Cursor, paths: Sequence[Union[str, bytes]], columns: Optional[Sequence[str]] = None):
         """
         Loads files from the database for the given paths.
 
@@ -303,18 +286,15 @@ class FileDatabase:
         if columns is not None and not isinstance(columns, list):
             columns = [columns]
 
-        c = self.connection.cursor()
-        c.arraysize = len(paths)
+        cursor.arraysize = len(paths)
 
         if columns is None:
-            c.execute("SELECT * FROM files WHERE path IN ({0})".format(','.join('?' for _ in paths)), paths)
+            cursor.execute("SELECT * FROM files WHERE path IN ({0})".format(','.join('?' for _ in paths)), paths)
         else:
             select = "SELECT {} FROM files".format(','.join(columns))
-            c.execute("{0} WHERE path IN ({1})".format(select, ','.join('?' for _ in paths)), paths)
+            cursor.execute("{0} WHERE path IN ({1})".format(select, ','.join('?' for _ in paths)), paths)
 
-        results = c.fetchall()
-
-        c.close()
+        results = cursor.fetchall()
 
         return results
 
@@ -353,7 +333,7 @@ class FileDatabase:
         self.insert_files(inserts)
         self.update_files_basic(updates)
 
-    def get_files_to_hash(self, start_id: int = 0, limit: int = 500):
+    def get_files_to_hash(self, cursor: sqlite3.Cursor, start_id: int = 0, limit: int = 500):
         """
         Returns a list of filepaths for files that need their hash calculated.
 
@@ -362,9 +342,7 @@ class FileDatabase:
          * the hash is the empty string
          * it was modified since it was hashed.
         """
-        c = self.connection.cursor()
-
-        c.execute("""
+        cursor.execute("""
             SELECT id, path 
             FROM files 
             WHERE is_directory = 0 AND
@@ -376,32 +354,28 @@ class FileDatabase:
                   id > {}
                   ORDER BY id
                   LIMIT {}""".format(start_id, limit))
-        results = c.fetchall()
-
-        c.close()
+        results = cursor.fetchall()
 
         return [DatabaseFile(key=result['id'], path=result['path']) for result in results]
 
-    def get_files_not_deleted(self, start_id: int = 0, limit: int = 500):
+    def get_files_not_deleted(self, cursor: sqlite3.Cursor, start_id: int = 0, limit: int = 500):
         """
         Returns a list of file/directory paths for files that do not have deleted_at set.
         """
-        c = self.connection.cursor()
-
-        c.execute("""
+        cursor.execute("""
             SELECT id, path 
             FROM files 
             WHERE id > {} AND 
                   deleted_at IS NULL
                   ORDER BY id
                   LIMIT {}""".format(start_id, limit))
-        results = c.fetchall()
+        results = cursor.fetchall()
 
-        c.close()
+        cursor.close()
 
         return [DatabaseFile(key=result['id'], path=result['path']) for result in results]
 
-    def get_directories(self, start_id: int = 0, columns: Optional[Sequence[str]] = None, limit: int = 500):
+    def get_directories(self, cursor: sqlite3.Cursor, start_id: int = 0, columns: Optional[Sequence[str]] = None, limit: int = 500):
         """
         Returns a list of directories that need to have their size updated.
 
@@ -413,8 +387,6 @@ class FileDatabase:
         if columns is not None and not isinstance(columns, list):
             columns = [columns]
 
-        c = self.connection.cursor()
-
         select = "SELECT * FROM files"
         if columns is not None:
             select = "SELECT {} FROM files".format(','.join(columns))
@@ -424,23 +396,21 @@ class FileDatabase:
                   is_directory = 1 AND
                   (size is NULL OR updated_at < modified_at) 
             ORDER BY id LIMIT {}""".format(start_id, limit)
-        c.execute(query)
+        cursor.execute(query)
 
-        results = c.fetchall()
+        results = cursor.fetchall()
 
-        c.close()
+        cursor.close()
 
         return results
 
-    def update_directory_sizes(self):
+    def update_directory_sizes(self, cursor: sqlite3.Cursor):
         """
         Calculates and updates the directory sizes for all directories in the database.
 
         Not the fastest thing in the world, be ready for a wait.
         """
-        c = self.connection.cursor()
-
-        c.execute("""
+        cursor.execute("""
             UPDATE files
             SET size = COALESCE(
                 (SELECT sum(f2.size)
@@ -449,15 +419,10 @@ class FileDatabase:
             WHERE files.is_directory = 1 and size is null;
             """)
 
-        self.connection.commit()
-        c.close()
-
-    def get_file_links(self, skip_identical: bool, skip_empty: bool, order: str, limit: int = 100, offset: int = 0) -> Sequence[FileLinkWithFiles]:
+    def get_file_links(self, cursor: sqlite3.Cursor, skip_identical: bool, skip_empty: bool, order: str, limit: int = 100, offset: int = 0) -> Sequence[FileLinkWithFiles]:
         """
         Loads file links from the database
         """
-
-        c = self.connection.cursor()
 
         query = """
             SELECT fl.*, 
@@ -493,11 +458,9 @@ class FileDatabase:
 
         query += "ORDER BY {} LIMIT {} OFFSET {}".format(order, limit, offset)
 
-        c.execute(query)
+        cursor.execute(query)
 
-        results = c.fetchall()
-
-        c.close()
+        results = cursor.fetchall()
 
         # Pre allocate list size
         formatted = [None] * len(results)
@@ -510,3 +473,49 @@ class FileDatabase:
             formatted[i] = file_link
 
         return formatted
+
+    def file_count(self) -> int:
+        """
+        :return: the number of file records in the database
+        """
+
+        connection = self.create_connection()
+        cursor = connection.cursor()
+
+        cursor.execute("SELECT COUNT(*) as count FROM files")
+        total_records = cursor.fetchone()['count']
+
+        cursor.close()
+        connection.close()
+
+        return total_records
+
+    def statistics(self) -> DatabaseStatistics:
+        """
+        Get's database statistics
+        """
+
+        connection = self.create_connection()
+        c = connection.cursor()
+
+        c.execute("SELECT COUNT(*) as count FROM files")
+        total_records = c.fetchone()['count']
+
+        c.execute("SELECT COUNT(*) as count FROM files WHERE is_directory = false")
+        files = c.fetchone()['count']
+
+        c.execute("SELECT COUNT(*) as count FROM files WHERE is_directory = true")
+        directories = c.fetchone()['count']
+
+        c.execute("SELECT SUM(size) as count FROM files WHERE is_directory = false")
+        size = c.fetchone()['count']
+
+        c.execute("SELECT COUNT(*) as count FROM files WHERE hash IS NOT NULL")
+        files_hashed = c.fetchone()['count']
+
+        c.close()
+        connection.close()
+
+        return DatabaseStatistics(total_records=total_records, files=files, directories=directories, total_size=size, files_hashed=files_hashed)
+
+
