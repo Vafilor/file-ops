@@ -91,7 +91,7 @@ def cli():
     pass
 
 
-@cli.command()
+@cli.command(help="Index files under a path. This does not calculate the hash.")
 @click.argument('path', type=click.Path(exists=True, file_okay=False, path_type=pathlib.Path))
 @click.option('-d', '--database',
               type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
@@ -113,7 +113,7 @@ def index(path: pathlib.Path, database: Optional[pathlib.Path], time_command: bo
     if time_command:
         print('"index {}" took {}'.format(path, time.time() - start))
 
-@cli.command('hash')
+@cli.command('hash', help="Calculates a hash for all of the files in the provided database and updates the record. This is a slow process.")
 @click.option('-d', '--database',
               type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
               help="Path to an existing database file. If not provided, one will be created named 'file.db' ")
@@ -135,7 +135,7 @@ def hash_files(database: Optional[pathlib.Path], time_command: bool):
         print('"hash {}" took {}'.format(database, time.time() - start))
 
 
-@cli.command('folder-stats')
+@cli.command('folder-stats', help="Runs a SQL query to calculate the size of each folder in the database.")
 @click.option('-d', '--database',
               type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
               help="Path to an existing database file. If not provided, one will be created named 'file.db' ")
@@ -168,7 +168,7 @@ def folder_stats_files(database: Optional[pathlib.Path], time_command: bool):
         print('"hash {}" took {}'.format(database, time.time() - start))
 
 # TODO - test to make sure this works across bucket boundaries
-@cli.command('map-duplicates')
+@cli.command('map-duplicates', help="Finds duplicate files by hash and stores the record in the database. Use list-duplicates to output these.")
 @click.option('-d', '--database',
               type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
               help="Path to an existing database file. If not provided, one will be created named 'file.db' ")
@@ -229,7 +229,7 @@ def map_duplicates(database: Optional[pathlib.Path], time_command: bool):
     if time_command:
         click.echo('"hash {}" took {}'.format(database, time.time() - start))
 
-@cli.command('list-duplicates')
+@cli.command('list-duplicates', help="Outputs the duplicated files. Use -o to set an output file [recommended]. Make sure to run map-duplicates first.")
 @click.option('-d', '--database',
               type=click.Path(exists=False, dir_okay=False, path_type=pathlib.Path),
               help="Path to an existing database file. If not provided, one will be created named 'file.db' ")
