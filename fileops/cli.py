@@ -104,9 +104,6 @@ def index(path: pathlib.Path, database: Optional[pathlib.Path], time_command: bo
     db = FileDatabase(database)
     db.create_tables()
 
-    print(f'path: {path}')
-    print(f'database file: {database}')
-
     file_indexer = create_file_indexer(path, db)
 
     start = time.time()
