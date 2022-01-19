@@ -18,6 +18,9 @@ class DatabaseStatistics:
 
 class FileDatabase:
     def __init__(self, path: pathlib.Path):
+        """
+        :param path: path to where the sqlite file should be created
+        """
         self.path = path
 
     def create_connection(self):
@@ -31,6 +34,9 @@ class FileDatabase:
         """Gets the current time in utc."""
         return datetime.datetime.utcnow()
 
+    def now_timestamp(self) -> int:
+        return int(self.now.timestamp())
+
     def create_tables(self):
         """
         Creates the database tables.
@@ -42,14 +48,14 @@ class FileDatabase:
         sql = """
             CREATE TABLE IF NOT EXISTS files(
                 id INTEGER PRIMARY KEY,
-                record_created_at timestamp,
-                updated_at timestamp,
+                record_created_at INTEGER,
+                updated_at INTEGER,
                 path TEXT,
-                modified_at timestamp,
-                deleted_at timestamp,
+                modified_at INTEGER,
+                deleted_at INTEGER,
                 size INTEGER,
                 hash TEXT,
-                hashed_at timestamp,
+                hashed_at INTEGER,
                 is_directory INTEGER
             );
         """
@@ -79,11 +85,40 @@ class FileDatabase:
         cursor.close()
         connection.close()
 
-    def get_files(self, cursor: sqlite3.Cursor, order: str, limit: int = 100, offset: int = 0) -> Sequence[DatabaseFile]:
+    def get_files(self, cursor: sqlite3.Cursor, order: Optional[str] = None, limit: int = 100, offset: int = 0) -> Sequence[DatabaseFile]:
         """
         Loads files from the database
         """
-        query = "SELECT * FROM files ORDER BY {} LIMIT {} OFFSET {}".format(order, limit, offset)
+        if order:
+            query = "SELECT * FROM files ORDER BY {} LIMIT {} OFFSET {}".format(order, limit, offset)
+        else:
+            query = "SELECT * FROM files LIMIT {} OFFSET {}".format(limit, offset)
+
+        cursor.execute(query)
+        results = cursor.fetchall()
+
+        # Pre allocate list size
+        formatted = [None] * len(results)
+        for i, result in enumerate(results):
+            db_file = DatabaseFile(
+                key=result['id'],
+                path=result['path'],
+                size=result['size'],
+                content_hash=result['hash'],
+                modified_at=result['modified_at'],
+                is_directory=result['is_directory'],
+                deleted_at=result['deleted_at']
+            )
+
+            formatted[i] = db_file
+
+        return formatted
+
+    def get_all_files(self, cursor: sqlite3.Cursor) -> Sequence[DatabaseFile]:
+        """
+        Loads files from the database
+        """
+        query = "SELECT * FROM files"
 
         cursor.execute(query)
         results = cursor.fetchall()
@@ -116,6 +151,26 @@ class FileDatabase:
                       "VALUES(?, ?);",
                       (base_file.key, file.key))
 
+    def insert_file(self, cursor: sqlite3.Cursor, file: File):
+        """
+        Inserts a file into the database with the following fields:
+            * path
+            * record_created_at
+            * updated_at
+            * modified_at
+            * deleted_at
+            * size
+            * is_directory
+
+        hash is not inserted.
+        """
+        now = self.now_timestamp()
+
+        cursor.execute("INSERT INTO files"
+                  "(path, record_created_at, updated_at, modified_at, deleted_at, size, is_directory) "
+                  "VALUES(?, ?, ?, ?, ?, ?, ?);",
+                  (file.path, now, now, file.modified_at, file.deleted_at,
+                   file.size, file.is_directory))
 
     def insert_files(self, cursor: sqlite3.Cursor, files: Union[Sequence[File], File]):
         """
@@ -136,7 +191,7 @@ class FileDatabase:
         if not isinstance(files, list):
             files = [files]
 
-        now = self.now
+        now = self.now_timestamp()
 
         for file in files:
             cursor.execute("INSERT INTO files"
@@ -144,7 +199,6 @@ class FileDatabase:
                       "VALUES(?, ?, ?, ?, ?, ?, ?);",
                       (file.path, now, now, file.modified_at, file.deleted_at,
                        file.size, file.is_directory))
-
 
     def update_files_basic(self, files: Union[Sequence[File], File]):
         """
@@ -160,7 +214,7 @@ class FileDatabase:
         if not isinstance(files, list):
             files = [files]
 
-        now = self.now
+        now = self.now_timestamp()
 
         c = self.connection.cursor()
 

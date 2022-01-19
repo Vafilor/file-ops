@@ -1,8 +1,10 @@
 import hashlib
 import os
 import stat
+import json
 from datetime import datetime
-from typing import Optional, Union
+from datetime import timezone
+from typing import Optional, Union, Any
 
 def humanize_file_size(size: int, decimals: int = 0) -> str:
     suffixs = ['', 'KB', 'MB', 'GB', 'TB']
@@ -21,15 +23,15 @@ class File:
     BytesToRead = 1048576
 
     def __init__(self, path: Union[bytes, str], size: Optional[int] = None, content_hash: Optional[str] = None,
-                 modified_at: Optional[datetime] = None, is_directory: Optional[bool] = None,
-                 deleted_at: Optional[datetime] = None, eager: bool = False):
+                 modified_at: Optional[int] = None, is_directory: Optional[bool] = None,
+                 deleted_at: Optional[int] = None, eager: bool = False):
         """
         If eager is set to true, file data (apart from content hash) are loaded immediately.
         """
         self.path = path
         self._size = size
         self._content_hash = content_hash
-        self._modified_at = modified_at
+        self.modified_at = modified_at
         self._is_directory = is_directory
         self.deleted_at = deleted_at
 
@@ -37,7 +39,7 @@ class File:
             self.load()
 
     @property
-    def size(self) -> Union[int, None]:
+    def size(self) -> Optional[int]:
         """
         For a File, returns the size of the file.
         For a directory, returns None.
@@ -89,22 +91,6 @@ class File:
         self._content_hash = value
 
     @property
-    def modified_at(self) -> datetime:
-        """
-        Returns the modified_at time as a datetime.
-
-        Raises a OSError if the file at the path can not be opened in rb mode.
-        """
-        if self._modified_at is None:
-            self.load()
-
-        return self._modified_at
-
-    @modified_at.setter
-    def modified_at(self, value: datetime):
-        self._modified_at = value
-
-    @property
     def is_directory(self) -> bool:
         """
         Raises a FileNotFoundError if the file is not found.
@@ -143,7 +129,7 @@ class File:
         """
         stats = os.stat(self.path)
         self.is_directory = stat.S_ISDIR(stats.st_mode)
-        self.modified_at = datetime.utcfromtimestamp(stats.st_mtime)
+        self.modified_at = int(stats.st_mtime)
 
         if not self.is_directory:
             self.size = stats.st_size
@@ -159,5 +145,5 @@ class File:
 
     def __str__(self):
         return 'file_path:{}\nsize:{}\nhash:{}\nmodified_at:{}\ndeleted_at:{}'.\
-            format(self.path, str(self._size), self._content_hash, self._modified_at,
+            format(self.path, str(self._size), self._content_hash, self.modified_at,
                    self.deleted_at)

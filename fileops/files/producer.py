@@ -3,7 +3,6 @@ import pathlib
 
 from os.path import join
 from multiprocessing import Queue
-from typing import Union
 
 from .file import File
 from ..pipe.operator import Operator
@@ -24,5 +23,5 @@ class FileProducer(Operator):
                 output_queue.put(file)
 
             for name in files:
-                file = File(path=join(root, name), is_directory=False)
+                file = File(path=join(root, name), is_directory=False, eager=True)
                 output_queue.put(file)
