@@ -59,7 +59,7 @@ def _generate_file_hashes(
     while True:
         conditions: list[ColumnElement[bool]] = [models.File.content_hash.is_not(None)]
         if last_hash:
-            conditions.append(models.FileStats.content_hash > last_hash)
+            conditions.append(models.File.content_hash > last_hash)
 
         query = (
             select(distinct(models.File.content_hash))
