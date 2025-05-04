@@ -154,8 +154,6 @@ def hash_file(file: File, output: queue.Queue[dict]) -> None:
 def hash_files(
     database: Database, max_workers: int = 5, batch_size_get: int = 500, batch_size_update: int = 100, log_level: str = "info"
 ) -> None:
-    # TODO-Andrey set a logging config file. Can we do it globally after running migrations?
-    # If we don't run migrations, it doesn't output it anywhere.
     logger.disabled = False
     logger.setLevel(logging.getLevelNamesMapping()[log_level.upper()])
 

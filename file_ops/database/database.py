@@ -12,7 +12,7 @@ class Database:
         database_path = self.get_database_file_path()
         engine_url = self._get_engine_url(database_path)
 
-        self.engine = create_engine(engine_url, echo=True)
+        self.engine = create_engine(engine_url)
 
         self.session_maker = sessionmaker(bind=self.engine)
         self.session = scoped_session(self.session_maker)

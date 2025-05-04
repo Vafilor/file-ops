@@ -19,7 +19,7 @@ from watchdog.observers import Observer
 
 from file_ops.database.database import Database
 from file_ops.database.models import File
-from file_ops.filesystem.filesystem import FileInfo, generate_file_data
+from file_ops.filesystem.filesystem import FileInfo, generate_file_insert_data
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class FileEventHandler(RegexMatchingEventHandler):
 
     def _on_file_changed(self, file_path: str, is_directory: bool) -> None:
         info = FileInfo(path=file_path, is_directory=is_directory)
-        data = generate_file_data(info)
+        data = generate_file_insert_data(info)
 
         with self._db.get_session() as session:
             result = session.execute(select(File).where(File.path == file_path))
@@ -133,7 +133,7 @@ class FileEventHandler(RegexMatchingEventHandler):
             
             if not existing_file:
                 info = FileInfo(path=dst_file_path, is_directory=event.is_directory)
-                data = generate_file_data(info)
+                data = generate_file_insert_data(info)
                 session.add(File(**data))
             else:
                 existing_file.path = dst_file_path

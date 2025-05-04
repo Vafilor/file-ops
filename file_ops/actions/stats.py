@@ -212,7 +212,8 @@ def calculate_stats(database: Database, batch_size: int = 500) -> None:
         updates = _get_file_stat_updates(
             file_stats=file_stats, hash_to_count=hash_to_count, now=now
         )
-        session.execute(update(models.FileStats), updates)
+        if len(updates):
+            session.execute(update(models.FileStats), updates)
 
         for file_stat in file_stats:
             list_hashes.remove(file_stat.content_hash)
@@ -221,7 +222,7 @@ def calculate_stats(database: Database, batch_size: int = 500) -> None:
         inserts = _get_file_stat_inserts(
             files=files, hash_to_count=hash_to_count, now=now
         )
-
-        session.execute(insert(models.FileStats), inserts)
+        if len(inserts):
+            session.execute(insert(models.FileStats), inserts)
 
         session.commit()
