@@ -10,10 +10,12 @@ from file_ops.database import models
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class FileInfo:
     path: str
     is_directory: bool
+
 
 def generate_file_paths(path: Path) -> Generator[FileInfo, None, None]:
     for dirpath, dirs, files in os.walk(path):
@@ -22,7 +24,6 @@ def generate_file_paths(path: Path) -> Generator[FileInfo, None, None]:
 
         for file in files:
             yield FileInfo(path=os.path.join(dirpath, file), is_directory=False)
-
 
 
 def generate_file_insert_data(file_info: FileInfo) -> dict:
@@ -37,7 +38,7 @@ def generate_file_insert_data(file_info: FileInfo) -> dict:
         "created_at": None,
         "modified_at": None,
         "is_directory": file_info.is_directory,
-        "status": "basic"
+        "status": "basic",
     }
 
     try:
@@ -53,10 +54,13 @@ def generate_file_insert_data(file_info: FileInfo) -> dict:
         result["modified_at"] = datetime.datetime.fromtimestamp(stats.st_mtime)
         result["created_at"] = datetime.datetime.fromtimestamp(stats.st_birthtime)
     except BaseException as be:
-        logger.error(f"Unable to get timestamps for file {file_info.path}", exc_info=True)
+        logger.error(
+            f"Unable to get timestamps for file {file_info.path}", exc_info=True
+        )
         result["error_message"] = str(be)
 
     return result
+
 
 def generate_file_update_data(file: models.File) -> dict:
     now = datetime.datetime.now()
@@ -65,13 +69,14 @@ def generate_file_update_data(file: models.File) -> dict:
         "id": file.id,
         "db_updated_at": now,
         "size": None,
-        "status": "basic"
+        "status": "basic",
     }
 
     try:
         stats = os.stat(file.path)
     except BaseException as be:
         logger.error(f"Unable to get stats for file {file.path}.", exc_info=True)
+        result["status"] = "failed_to_index"
         result["error_message"] = str(be)
 
         return result
@@ -81,6 +86,7 @@ def generate_file_update_data(file: models.File) -> dict:
         result["modified_at"] = datetime.datetime.fromtimestamp(stats.st_mtime)
     except BaseException as be:
         logger.error(f"Unable to get timestamps for file {file.path}", exc_info=True)
+        result["status"] = "failed_to_index"
         result["error_message"] = str(be)
 
     return result

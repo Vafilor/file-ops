@@ -16,6 +16,12 @@ class FileStatus(StrEnum):
     HASHING = "hashing"
     "The file is currently hashing"
 
+    FAILED_TO_HASH = "failed_to_hash"
+    "The file failed to hash"
+
+    FAILED_TO_INDEX = "failed_to_index"
+    "The file failed to index"
+
 
 class File(Base):
     __tablename__ = "files"

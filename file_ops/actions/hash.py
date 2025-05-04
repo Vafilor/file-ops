@@ -146,7 +146,7 @@ def hash_file(file: File, output: queue.Queue[dict]) -> None:
         logging.error(f"Unable to get hash of file {file.path}.", exc_info=True)
         output.put({
             "id": file.id,
-            "status": FileStatus.BASIC,
+            "status": FileStatus.FAILED_TO_HASH,
             "error_message": str(be),
         })
 

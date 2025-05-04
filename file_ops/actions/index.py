@@ -52,7 +52,9 @@ def _filter_update_changes(files: list[File]) -> list[dict]:
     changes: list[dict] = []
     for file in files:
         update_data = generate_file_update_data(file)
-        if (
+        if "error_message" in update_data:
+            changes.append(update_data)
+        elif (
             update_data["status"] != file.status
             or update_data["size"] != file.size
             or update_data["modified_at"] != file.modified_at
