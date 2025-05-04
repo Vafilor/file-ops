@@ -1,0 +1,53 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Unique Name",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/file_ops/cli.py",
+            "args": ["uqname", "path"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Index",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/file_ops/cli.py",
+            "args": ["index", "path"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Stats",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/file_ops/cli.py",
+            "args": ["stats"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Hash",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/file_ops/cli.py",
+            "args": ["hash"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Watch",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/file_ops/cli.py",
+            "args": ["watch", "--path=/path"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ]
+}
