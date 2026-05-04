@@ -11,9 +11,11 @@ from file_ops.database.database import Database
 from file_ops.database.models import File
 from file_ops.filesystem.filesystem import (
     FileInfo,
+    FileUpdate,
     generate_file_insert_data,
     generate_file_paths,
     generate_file_update_data,
+    get_file_change,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,24 +50,20 @@ def _get_file_actions(
     return inserts, updates
 
 
-def _filter_update_changes(files: list[File]) -> list[dict]:
-    changes: list[dict] = []
+def _filter_update_changes(files: list[File]) -> list[FileUpdate]:
+    changes: list[FileUpdate] = []
     for file in files:
         update_data = generate_file_update_data(file)
-        if "error_message" in update_data:
-            changes.append(update_data)
-        elif (
-            update_data["status"] != file.status
-            or update_data["size"] != file.size
-            or update_data["modified_at"] != file.modified_at
-        ):
+        if get_file_change(file, update_data):
             changes.append(update_data)
 
     return changes
 
 
-def index_directory(path: Path, database: Database, batch_size: int = 500) -> None:
-    gen = batch_items(generate_file_paths(path), batch_size=batch_size)
+def index_directory(
+    path: Path, database: Database, batch_size: int = 500, skip: list[str] | None = None
+) -> None:
+    gen = batch_items(generate_file_paths(path, skip=skip), batch_size=batch_size)
 
     total_files_inserted = 0
     total_files_updated = 0
@@ -98,10 +96,14 @@ def index_directory(path: Path, database: Database, batch_size: int = 500) -> No
             session.commit()
 
             if len(inserts):
-                print(f"Inserted {len(inserts)} files. {total_files_inserted} total")
+                logger.info(
+                    f"Inserted {len(inserts)} files. {total_files_inserted} total"
+                )
 
             if update_changes:
-                print(f"Updated {update_changes} files. {total_files_updated} total")
+                logger.info(
+                    f"Updated {update_changes} files. {total_files_updated} total"
+                )
 
             if not len(inserts) and not update_changes:
-                print("No updates or inserts")
+                logger.info("No updates or inserts")

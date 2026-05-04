@@ -16,6 +16,9 @@ class FileStatus(StrEnum):
     HASHING = "hashing"
     "The file is currently hashing"
 
+    CHECKING = "checking"
+    "Checking the validity of the file. Is it still there, has it been deleted?"
+
     FAILED_TO_HASH = "failed_to_hash"
     "The file failed to hash"
 

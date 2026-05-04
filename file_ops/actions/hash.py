@@ -2,18 +2,24 @@ import hashlib
 import logging
 import queue
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generator, Sequence
+from typing import Any, Sequence
 
-from sqlalchemy import ColumnElement, func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import update
 
 from file_ops.database.database import Database
+from file_ops.database.file_service import FileError, FileService
 from file_ops.database.models import File, FileStatus
-from file_ops.database.utils import change_files_status, update_files_to_status
+from file_ops.logging_config import verbosity_extra
 
 logger = logging.getLogger(__name__)
+
+
+handlers = logger.handlers
+
 
 class HashStats:
     def __init__(self) -> None:
@@ -22,21 +28,20 @@ class HashStats:
         self.expected_total = 0
 
 
-
-class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
-    def __init__(self, maxsize: int = 50, *args: Any, **kwargs: Any) -> None:
-        super(ThreadPoolExecutorWithQueueSizeLimit, self).__init__(*args, **kwargs)
-        self._work_queue = queue.Queue(maxsize=maxsize)  # type: ignore
-
-
 class FileUpdater(threading.Thread):
-    def __init__(self, database: Database, hashed_file_queue: queue.Queue[dict], stats: HashStats, max_size: int = 100):
+    def __init__(
+        self,
+        database: Database,
+        hashed_file_queue: queue.Queue[dict],
+        stats: HashStats,
+        max_size: int = 100,
+    ):
         super().__init__()
         self.max_size = max_size
         self._updated_file_data: list[dict[str, Any]] = []
         self.hashed_file_queue = hashed_file_queue
         self.database = database
-        self.max_tries = 3
+        self.max_tries = 5
         self.stats = stats
 
     def run(self) -> None:
@@ -54,13 +59,14 @@ class FileUpdater(threading.Thread):
 
                 if len(self._updated_file_data) >= self.max_size:
                     self.flush()
+                    self._updated_file_data = []
         except queue.ShutDown:
             return
 
     def flush(self) -> None:
         if not len(self._updated_file_data):
             return
-        
+
         tries = 0
 
         while tries < self.max_tries:
@@ -69,125 +75,147 @@ class FileUpdater(threading.Thread):
                 with self.database.get_session() as session:
                     session.execute(update(File), self._updated_file_data)
                     session.commit()
-                    logger.info(f"Flushed changes for {len(self._updated_file_data)} files")
-                    logger.info(f"{self.stats.success} / {self.stats.expected_total} processed with {self.stats.failed} errors")
-                    self._updated_file_data = []
+                    logger.info(
+                        f"{self.stats.success:,} / {self.stats.expected_total:,} processed with {self.stats.failed:,} errors"
+                    )
                     break
-            except BaseException:
-                logger.error(f"Unable to flush hash updates. Try {tries}/{self.max_size}", exc_info=True)
+            except Exception:
+                logger.error(
+                    f"Unable to flush hash updates. Try {tries}/{self.max_tries}",
+                    exc_info=True,
+                )
                 if tries == self.max_tries:
                     raise
-
-
-def _get_file_to_hash_conditions() -> list[ColumnElement]:
-    return [
-        File.status == FileStatus.BASIC,
-        File.content_hash.is_(None),
-        File.is_directory.is_(False),
-    ]
-
-def get_files_to_hash(session: Session, limit: int) -> Sequence[File]:
-    conditions = _get_file_to_hash_conditions()
-
-    try:
-        query = (
-            select(File)
-            .where(*conditions)
-            .limit(limit)
-        )
-
-        return session.scalars(query).all()
-    except BaseException as be:
-        print(str(be))
-        logging.error("error", exc_info=True)
-        return []
-    
-def count_files_to_hash(session: Session) -> int:
-    conditions = _get_file_to_hash_conditions()
-
-    query = (
-        select(func.count(File.id))
-        .where(*conditions)
-    )
-
-    count = session.scalar(query)
-
-    return count if count else 0
-
-
-def generate_files_to_hash(
-    database: Database, batch_size: int
-) -> Generator[Sequence[File], None, None]:
-    while True:
-        with database.get_session() as session:
-            files = get_files_to_hash(session=session, limit=batch_size)
-            if not len(files):
-                break
-
-        yield files
+                else:
+                    # Sleep a little before retrying flush
+                    time.sleep(0.25)
 
 
 def hash_file_path(path: Path) -> str:
+    logger.info(f"Hashing: {path}", extra=verbosity_extra(3))
     with open(path, "rb") as f:
         digest = hashlib.file_digest(f, "sha256")
+
+    logger.info(f"Done Hashing {path}", extra=verbosity_extra(3))
 
     return digest.hexdigest()
 
 
-def hash_file(file: File, output: queue.Queue[dict]) -> None:
+def hash_file(
+    file: File,
+    output: queue.Queue[dict],
+) -> None:
+    """Hashes a file and puts the results into the output queue."""
+
     try:
         digest = hash_file_path(Path(file.path))
-        output.put({
-            "id": file.id,
-            "content_hash": digest,
-            "status": FileStatus.BASIC,
-        })
-    except BaseException as be:
+        output.put(
+            {
+                "id": file.id,
+                "content_hash": digest,
+                "status": FileStatus.BASIC,
+            }
+        )
+        time.sleep(0.090)
+    except Exception as e:
         logging.error(f"Unable to get hash of file {file.path}.", exc_info=True)
-        output.put({
-            "id": file.id,
-            "status": FileStatus.FAILED_TO_HASH,
-            "error_message": str(be),
-        })
+        output.put(
+            {
+                "id": file.id,
+                "status": FileStatus.FAILED_TO_HASH,
+                "error_message": str(e),
+            }
+        )
+
+
+@dataclass
+class SplitFiles:
+    not_existing: list[File]  # Moved or maybe deleted
+    existing: list[File]
+    error: list[FileError]  # Error trying to read
+
+
+def split_files_by_existing(files: Sequence[File]) -> SplitFiles:
+    result = SplitFiles(not_existing=[], existing=[], error=[])
+
+    for file in files:
+        try:
+            if Path(file.path).exists():
+                result.existing.append(file)
+            else:
+                result.not_existing.append(file)
+        except OSError as e:
+            result.error.append(FileError(file=file, error=e))
+
+    return result
 
 
 def hash_files(
-    database: Database, max_workers: int = 5, batch_size_get: int = 500, batch_size_update: int = 100, log_level: str = "info"
+    database: Database,
+    prefix: str | None = None,
+    max_workers: int = 2,
+    batch_size_get: int = 500,
+    batch_size_update: int = 100,
 ) -> None:
-    logger.disabled = False
-    logger.setLevel(logging.getLevelNamesMapping()[log_level.upper()])
+    file_service = FileService(session_maker=lambda: database.get_session())
 
-    with database.get_session() as session:
-        change_files_status(
-            session=session,
-            from_status=FileStatus.HASHING,
-            to_status=FileStatus.BASIC,
-        )
-        session.commit()
+    logger.info("Clearing statuses")
 
+    file_service.change_files_status_batched(
+        from_status=[FileStatus.CHECKING, FileStatus.HASHING],
+        to_status=FileStatus.BASIC,
+        batch_size=batch_size_get,
+    )
+
+    logger.info("Counting files to hash")
     stats = HashStats()
-    with database.get_session() as session:
-        stats.expected_total = count_files_to_hash(session=session)
+    stats.expected_total = file_service.count_files_to_hash(prefix=prefix)
 
+    logger.info(f"Found {stats.expected_total:,} files to hash")
+
+    logger.info("Starting to calculate file hashes")
     hashed_file_queue = queue.Queue[dict](maxsize=100)
 
-    updater = FileUpdater(database=database, hashed_file_queue=hashed_file_queue, stats=stats, max_size=batch_size_update)
+    updater = FileUpdater(
+        database=database,
+        hashed_file_queue=hashed_file_queue,
+        stats=stats,
+        max_size=batch_size_update,
+    )
     updater.start()
 
-    with ThreadPoolExecutorWithQueueSizeLimit(maxsize=100, max_workers=max_workers) as executor:
-        for files in generate_files_to_hash(
-            database=database, batch_size=batch_size_get
+    workers_semaphor = threading.Semaphore(value=max_workers * 10)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for files in file_service.generate_files_to_hash(
+            prefix=prefix, batch_size=batch_size_get
         ):
-            file_ids = [file.id for file in files]
-            with database.get_session() as session:
-                update_files_to_status(
-                    session=session, ids=file_ids, status=FileStatus.HASHING
-                )
-                session.commit()
+            file_status = split_files_by_existing(files=files)
 
-            for file in files:
-                executor.submit(hash_file, file, hashed_file_queue)
+            file_service.delete_files(file_status.not_existing)
 
+            error_updates = [
+                {
+                    "id": file_error.file.id,
+                    "error": str(file_error.error),
+                    "status": FileStatus.FAILED_TO_HASH,
+                }
+                for file_error in file_status.error
+            ]
+            file_service.update_files(changes=error_updates)
+            file_service.change_file_status_for_ids(
+                file_ids=[file.id for file in file_status.existing],
+                to_status=FileStatus.HASHING,
+            )
+
+            for file in file_status.existing:
+                workers_semaphor.acquire()
+
+                time.sleep(0.020)
+
+                hash_file_future = executor.submit(hash_file, file, hashed_file_queue)
+
+                hash_file_future.add_done_callback(lambda _: workers_semaphor.release())
 
     hashed_file_queue.join()
     hashed_file_queue.shutdown()

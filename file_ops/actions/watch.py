@@ -1,6 +1,8 @@
 import datetime
 import logging
 import os
+import re
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -18,6 +20,7 @@ from watchdog.events import (
 from watchdog.observers import Observer
 
 from file_ops.database.database import Database
+from file_ops.database.file_service import FileService
 from file_ops.database.models import File
 from file_ops.filesystem.filesystem import FileInfo, generate_file_insert_data
 
@@ -32,7 +35,7 @@ class FileEventHandler(RegexMatchingEventHandler):
         ignore_regexes: list[str] | None = None,
         ignore_directories: bool = False,
         case_sensitive: bool = False,
-        db: Database,
+        file_service: FileService,
     ):
         super().__init__(
             regexes=regexes,
@@ -40,7 +43,7 @@ class FileEventHandler(RegexMatchingEventHandler):
             ignore_directories=ignore_directories,
             case_sensitive=case_sensitive,
         )
-        self._db = db
+        self.file_service = file_service
 
     def _update_existing_file_on_change(self, file: File, data: dict[str, Any]) -> None:
         file.db_updated_at = data["db_updated_at"]
@@ -56,7 +59,7 @@ class FileEventHandler(RegexMatchingEventHandler):
         info = FileInfo(path=file_path, is_directory=is_directory)
         data = generate_file_insert_data(info)
 
-        with self._db.get_session() as session:
+        with self.file_service.session_maker() as session:
             result = session.execute(select(File).where(File.path == file_path))
             existing_file: File | None = result.scalar_one_or_none()
             if not existing_file:
@@ -74,6 +77,7 @@ class FileEventHandler(RegexMatchingEventHandler):
             if isinstance(event.src_path, str)
             else event.src_path.decode("utf-8")
         )
+
         self._on_file_changed(file_path=file_path, is_directory=event.is_directory)
 
     def on_modified(self, event: DirModifiedEvent | FileModifiedEvent) -> None:
@@ -95,12 +99,7 @@ class FileEventHandler(RegexMatchingEventHandler):
             else event.src_path.decode("utf-8")
         )
 
-        with self._db.get_session() as session:
-            result = session.execute(select(File).where(File.path == file_path))
-            existing_file: File | None = result.scalar_one_or_none()
-            if existing_file:
-                session.delete(existing_file)
-                session.commit()
+        self.file_service.delete_file_for_path(path=file_path)
 
     def on_moved(self, event: DirMovedEvent | FileMovedEvent) -> None:
         logger.info("on_file_moved", extra={"event": event})
@@ -117,11 +116,13 @@ class FileEventHandler(RegexMatchingEventHandler):
         )
 
         now = datetime.datetime.now()
-        with self._db.get_session() as session:
-            query = select(File).where(or_(File.path == src_file_path, File.path == dst_file_path))
+        with self.file_service.session_maker() as session:
+            query = select(File).where(
+                or_(File.path == src_file_path, File.path == dst_file_path)
+            )
             results = session.scalars(query).all()
-            existing_file: File|None = None
-            existing_destination: File|None = None
+            existing_file: File | None = None
+            existing_destination: File | None = None
             for result in results:
                 if result.path == src_file_path:
                     existing_file = result
@@ -130,7 +131,7 @@ class FileEventHandler(RegexMatchingEventHandler):
 
             if existing_destination:
                 session.delete(existing_destination)
-            
+
             if not existing_file:
                 info = FileInfo(path=dst_file_path, is_directory=event.is_directory)
                 data = generate_file_insert_data(info)
@@ -144,22 +145,26 @@ class FileEventHandler(RegexMatchingEventHandler):
                     existing_file.modified_at = datetime.datetime.fromtimestamp(
                         stats.st_mtime
                     )
-                except BaseException as be:
+                except Exception as e:
                     logger.error(
                         f"Unable to get stats for file {dst_file_path}.", exc_info=True
                     )
-                    existing_file.error_message = str(be)
+                    existing_file.error_message = str(e)
 
             session.commit()
 
 
-def watch(path: str, database: Database) -> None:
+def watch(path: Path, database: Database) -> None:
+    database_path = str(database.get_database_directory().resolve())
+    escaped = re.escape(database_path + os.sep) + ".*"
+
+    file_service = FileService(session_maker=lambda: database.get_session())
     event_handler = FileEventHandler(
-        db=database,
-        ignore_regexes=[str(database.get_database_directory()) + "/*"]
+        file_service=file_service,
+        ignore_regexes=[escaped],
     )
     observer = Observer()
-    observer.schedule(event_handler, path, recursive=True)
+    observer.schedule(event_handler, str(path), recursive=True)
     observer.start()
     try:
         while observer.is_alive():

@@ -17,10 +17,15 @@
             "name": "Index",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/file_ops/cli.py",
-            "args": ["index", "path"],
+            "module": "file_ops.cli",
+            "args": [
+                "index",
+                "E:\\"
+            ],
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}"
+        },
         },
         {
             "name": "Stats",

@@ -25,8 +25,6 @@ pip install file-ops
 
 ## Commands
 
-All commands support a `--time` flag to output how long it took.
-
 ### Index File Stats (no hash is calculated for files)
 
 Note: The database file is automatically created if it does not exist and defaults to `files.db`.
@@ -153,3 +151,15 @@ Once you have all of the files indexed for a drive, store them all in a director
 With this, remove all duplicates via hash comparison.
 
 This wouldn't work for auto-generated files of course and may only be useful for relatively static directories.
+
+## Command order
+
+1. index <path>
+2. hash
+3. stats
+4. dedupe
+
+## To check and update for changes
+1. check 
+2. hash
+3. stats
